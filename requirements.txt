@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+python-telegram-bot
+sqlalchemy
+asyncpg
+python-dotenv
