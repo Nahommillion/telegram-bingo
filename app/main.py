@@ -2,7 +2,6 @@
 import os
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
@@ -25,14 +24,15 @@ from telegram.ext import (
     filters,
 )
 
-# --------------------------------------------------
+# ==================================================
 # CONFIGURATION
-# --------------------------------------------------
+# ==================================================
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
+
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
@@ -44,9 +44,10 @@ SUPPORT_URL = os.getenv("SUPPORT_URL", "").strip()
 engine = None
 telegram_app = None
 
-# --------------------------------------------------
+
+# ==================================================
 # BILINGUAL KEYBOARDS
-# --------------------------------------------------
+# ==================================================
 
 MENUS = {
     "en": [
@@ -95,9 +96,10 @@ ACTIONS = {
     "🌐 ቋንቋ ይቀይሩ": "language",
 }
 
-# --------------------------------------------------
-# DATABASE
-# --------------------------------------------------
+
+# ==================================================
+# DATABASE SETUP
+# ==================================================
 
 async def setup_database():
     global engine
@@ -135,7 +137,6 @@ async def setup_database():
             )
         """))
 
-        # Safely add the display_name field if an older table exists.
         await conn.execute(text("""
             ALTER TABLE bingo_users
             ADD COLUMN IF NOT EXISTS display_name VARCHAR(100)
@@ -171,7 +172,7 @@ async def setup_database():
             )
         """))
 
-    logger.info("PostgreSQL tables are ready.")
+    logger.info("Database tables are ready.")
 
 
 async def ensure_user(user):
@@ -179,7 +180,8 @@ async def ensure_user(user):
         raise RuntimeError("Database is not initialized.")
 
     default_language = (
-        "am" if (user.language_code or "").lower().startswith("am")
+        "am"
+        if (user.language_code or "").lower().startswith("am")
         else "en"
     )
 
@@ -190,8 +192,8 @@ async def ensure_user(user):
                     (telegram_id, username, display_name, language)
                 VALUES
                     (:tid, :username, :display_name, :language)
-                ON CONFLICT (telegram_id) DO UPDATE SET
-                    username = EXCLUDED.username
+                ON CONFLICT (telegram_id)
+                DO UPDATE SET username = EXCLUDED.username
             """),
             {
                 "tid": user.id,
@@ -215,7 +217,8 @@ async def get_language(telegram_id):
     async with engine.connect() as conn:
         result = await conn.execute(
             text("""
-                SELECT language FROM bingo_users
+                SELECT language
+                FROM bingo_users
                 WHERE telegram_id = :tid
             """),
             {"tid": telegram_id},
@@ -241,7 +244,8 @@ async def get_balance(telegram_id):
     async with engine.connect() as conn:
         result = await conn.execute(
             text("""
-                SELECT balance FROM bingo_wallets
+                SELECT balance
+                FROM bingo_wallets
                 WHERE telegram_id = :tid
             """),
             {"tid": telegram_id},
@@ -251,16 +255,16 @@ async def get_balance(telegram_id):
     return float(row[0]) if row else 0.0
 
 
-# --------------------------------------------------
-# KEYBOARD AND WELCOME MESSAGE
-# --------------------------------------------------
+# ==================================================
+# KEYBOARD AND WELCOME MESSAGES
+# ==================================================
 
 def make_keyboard(language):
     return ReplyKeyboardMarkup(
         MENUS[language],
         resize_keyboard=True,
         one_time_keyboard=False,
-        is_persistent=True,
+        is_persistent=False,
         input_field_placeholder=(
             "Choose a Bingo option 🎱"
             if language == "en"
@@ -281,8 +285,7 @@ def welcome_message(language):
             "👥 ጓደኞችዎን ይጋብዙ\n\n"
             "👇 ከታች ካሉት የቁልፍ ሰሌዳ አዝራሮች "
             "አንዱን በመጫን ይቀጥሉ!\n\n"
-            "🌍 Welcome to Bingo! Choose a button below "
-            "to get started."
+            "🌍 Welcome to Bingo! Choose a button below."
         )
 
     return (
@@ -310,9 +313,9 @@ async def show_menu(update: Update, language=None):
     )
 
 
-# --------------------------------------------------
-# /START AND REFERRALS
-# --------------------------------------------------
+# ==================================================
+# START COMMAND AND REFERRALS
+# ==================================================
 
 async def start_command(
     update: Update,
@@ -321,7 +324,6 @@ async def start_command(
     user = update.effective_user
     await ensure_user(user)
 
-    # Register a referral only when a valid new referrer is supplied.
     if context.args:
         referral_arg = context.args[0]
 
@@ -346,10 +348,9 @@ async def start_command(
                             },
                         )
             except ValueError:
-                logger.info("Invalid referral code received.")
+                logger.info("Invalid referral code.")
 
-    # Remove any old persistent keyboard before sending the new one.
-    # The new reply keyboard is attached to the welcome message.
+    # Remove any old keyboard, then show the new dashboard keyboard.
     await update.effective_message.reply_text(
         "🎱 Bingo menu is ready!",
         reply_markup=ReplyKeyboardRemove(),
@@ -358,9 +359,9 @@ async def start_command(
     await show_menu(update)
 
 
-# --------------------------------------------------
-# MENU ACTIONS
-# --------------------------------------------------
+# ==================================================
+# KEYBOARD BUTTON HANDLER
+# ==================================================
 
 async def menu_handler(
     update: Update,
@@ -380,7 +381,9 @@ async def menu_handler(
         if selected.startswith("/"):
             context.user_data["waiting_for_username"] = False
             await message.reply_text(
-                "Name change cancelled. Use the keyboard below.",
+                "Name change cancelled."
+                if language == "en"
+                else "የስም ለውጡ ተሰርዟል።",
                 reply_markup=make_keyboard(language),
             )
             return
@@ -405,6 +408,7 @@ async def menu_handler(
             )
 
         context.user_data["waiting_for_username"] = False
+
         await message.reply_text(
             f"✅ Your display name is now: {new_name}"
             if language == "en"
@@ -424,7 +428,9 @@ async def menu_handler(
         )
         return
 
+    # --------------------------------------------------
     # PLAY NOW
+    # --------------------------------------------------
     if action == "play":
         if WEB_APP_URL:
             keyboard = InlineKeyboardMarkup([[
@@ -437,11 +443,11 @@ async def menu_handler(
                     web_app=WebAppInfo(url=WEB_APP_URL),
                 )
             ]])
+
             await message.reply_text(
                 (
                     "🎱 Ready to play!\n"
-                    "Open the Bingo app below. Your balance and "
-                    "game eligibility will be checked by the app."
+                    "Open the Bingo app below."
                     if language == "en"
                     else
                     "🎱 ለመጫወት ዝግጁ ነዎት!\n"
@@ -462,9 +468,12 @@ async def menu_handler(
                 reply_markup=make_keyboard(language),
             )
 
-    # BALANCE
+    # --------------------------------------------------
+    # CHECK BALANCE
+    # --------------------------------------------------
     elif action == "balance":
         balance = await get_balance(user.id)
+
         await message.reply_text(
             (
                 f"💰 Your Bingo balance: {balance:,.2f} Birr\n"
@@ -477,32 +486,41 @@ async def menu_handler(
             reply_markup=make_keyboard(language),
         )
 
+    # --------------------------------------------------
     # DEPOSIT
+    # --------------------------------------------------
     elif action == "deposit":
         await message.reply_text(
             (
-                "➕ Deposits are not enabled yet.\n"
+                "➕ Deposits are not enabled yet.\n\n"
                 "🛡️ Please do not send money to anyone claiming "
                 "to deposit funds into this bot. Payment verification "
                 "must be configured first."
                 if language == "en"
                 else
-                "➕ የገንዘብ ማስገባት አገልግሎት ገና አልተጀመረም።\n"
+                "➕ የገንዘብ ማስገባት አገልግሎት ገና አልተጀመረም።\n\n"
                 "🛡️ የክፍያ ማረጋገጫ እስኪዘጋጅ ድረስ "
                 "ለማንም ገንዘብ አይላኩ።"
             ),
             reply_markup=make_keyboard(language),
         )
 
+    # --------------------------------------------------
     # SUPPORT
+    # --------------------------------------------------
     elif action == "support":
         if SUPPORT_URL:
             keyboard = InlineKeyboardMarkup([[
                 InlineKeyboardButton(
-                    "🆘 Contact Support",
+                    text=(
+                        "🆘 Contact Support"
+                        if language == "en"
+                        else "🆘 ድጋፍን ያግኙ"
+                    ),
                     url=SUPPORT_URL,
                 )
             ]])
+
             await message.reply_text(
                 (
                     "🆘 Need help? Tap below to contact support."
@@ -521,14 +539,16 @@ async def menu_handler(
                 reply_markup=make_keyboard(language),
             )
 
+    # --------------------------------------------------
     # INSTRUCTIONS
+    # --------------------------------------------------
     elif action == "instructions":
         await message.reply_text(
             (
                 "📖 HOW TO PLAY BINGO\n\n"
                 "1️⃣ Open Play Now.\n"
                 "2️⃣ Choose an available cartela.\n"
-                "3️⃣ Select the stake when games are enabled.\n"
+                "3️⃣ Select a stake when games are enabled.\n"
                 "4️⃣ Watch the called numbers.\n"
                 "5️⃣ Claim Bingo when your card matches a valid pattern.\n\n"
                 "🛡️ Never pay outside the official verified payment process."
@@ -545,14 +565,16 @@ async def menu_handler(
             reply_markup=make_keyboard(language),
         )
 
+    # --------------------------------------------------
     # WIN PATTERNS
+    # --------------------------------------------------
     elif action == "patterns":
         await message.reply_text(
             (
                 "🏆 WINNING PATTERNS\n\n"
                 "The official winning-pattern guide will appear here "
-                "when it is configured. A claim must be checked by "
-                "the server before a prize is awarded."
+                "when it is configured. Claims must be validated "
+                "by the server before a prize is awarded."
                 if language == "en"
                 else
                 "🏆 የማሸነፊያ ቅጦች\n\n"
@@ -563,27 +585,35 @@ async def menu_handler(
             reply_markup=make_keyboard(language),
         )
 
+    # --------------------------------------------------
     # CHANGE DISPLAY NAME
+    # --------------------------------------------------
     elif action == "username":
         context.user_data["waiting_for_username"] = True
+
         await message.reply_text(
             (
                 "✏️ Send the display name you want to use "
                 "(maximum 100 characters)."
                 if language == "en"
-                else "✏️ መጠቀም የሚፈልጉትን የሚታይ ስም ይላኩ "
-                     "(ከፍተኛው 100 ቁምፊ)።"
+                else
+                "✏️ መጠቀም የሚፈልጉትን የሚታይ ስም ይላኩ "
+                "(ከፍተኛው 100 ቁምፊ)።"
             ),
             reply_markup=make_keyboard(language),
         )
 
+    # --------------------------------------------------
     # INVITE FRIENDS
+    # --------------------------------------------------
     elif action == "invite":
         bot_username = context.bot.username
+
         if bot_username:
             referral_link = (
                 f"https://t.me/{bot_username}?start=ref_{user.id}"
             )
+
             await message.reply_text(
                 (
                     "👥 INVITE FRIENDS\n\n"
@@ -605,7 +635,9 @@ async def menu_handler(
                 reply_markup=make_keyboard(language),
             )
 
+    # --------------------------------------------------
     # LEADERBOARD
+    # --------------------------------------------------
     elif action == "leaderboard":
         await message.reply_text(
             (
@@ -621,7 +653,9 @@ async def menu_handler(
             reply_markup=make_keyboard(language),
         )
 
+    # --------------------------------------------------
     # TRANSACTION HISTORY
+    # --------------------------------------------------
     elif action == "history":
         async with engine.connect() as conn:
             result = await conn.execute(
@@ -643,16 +677,17 @@ async def menu_handler(
                 else "📜 እስካሁን ምንም ግብይት የለዎትም።"
             )
         else:
-            heading = (
+            history_text = (
                 "📜 RECENT TRANSACTIONS\n\n"
                 if language == "en"
                 else "📜 የቅርብ ጊዜ ግብይቶች\n\n"
             )
-            history_text = heading
+
             for transaction_type, amount, status, created_at in rows:
                 history_text += (
-                    f"• {transaction_type} | {float(amount):,.2f} Birr"
-                    f" | {status} | {created_at:%Y-%m-%d %H:%M}\n"
+                    f"• {transaction_type} | "
+                    f"{float(amount):,.2f} Birr | "
+                    f"{status} | {created_at:%Y-%m-%d %H:%M}\n"
                 )
 
         await message.reply_text(
@@ -660,10 +695,13 @@ async def menu_handler(
             reply_markup=make_keyboard(language),
         )
 
-    # LANGUAGE
+    # --------------------------------------------------
+    # CHANGE LANGUAGE
+    # --------------------------------------------------
     elif action == "language":
         new_language = "am" if language == "en" else "en"
         await set_language(user.id, new_language)
+
         await message.reply_text(
             (
                 "🌐 Language changed to English."
@@ -672,15 +710,16 @@ async def menu_handler(
             ),
             reply_markup=make_keyboard(new_language),
         )
+
         await message.reply_text(
             welcome_message(new_language),
             reply_markup=make_keyboard(new_language),
         )
 
 
-# --------------------------------------------------
-# TELEGRAM BOT STARTUP AND SHUTDOWN
-# --------------------------------------------------
+# ==================================================
+# BOT STARTUP AND SHUTDOWN
+# ==================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -695,7 +734,10 @@ async def lifespan(app: FastAPI):
             .build()
         )
 
-        telegram_app.add_handler(CommandHandler("start", start_command))
+        telegram_app.add_handler(
+            CommandHandler("start", start_command)
+        )
+
         telegram_app.add_handler(
             MessageHandler(
                 filters.TEXT & ~filters.COMMAND,
@@ -722,6 +764,7 @@ async def lifespan(app: FastAPI):
     if telegram_app is not None:
         if telegram_app.updater is not None:
             await telegram_app.updater.stop()
+
         await telegram_app.stop()
         await telegram_app.shutdown()
 
@@ -729,9 +772,9 @@ async def lifespan(app: FastAPI):
         await engine.dispose()
 
 
-# --------------------------------------------------
+# ==================================================
 # FASTAPI WEB SERVICE
-# --------------------------------------------------
+# ==================================================
 
 app = FastAPI(
     title="Telegram Bingo",
@@ -765,8 +808,13 @@ async def home():
           padding: 32px;
           max-width: 480px;
         }
-        h1 { font-size: 38px; }
-        p { line-height: 1.7; color: #e5e7eb; }
+        h1 {
+          font-size: 38px;
+        }
+        p {
+          line-height: 1.7;
+          color: #e5e7eb;
+        }
       </style>
     </head>
     <body>
@@ -794,7 +842,9 @@ async def database_health():
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
+
         return {"status": "connected"}
+
     except Exception:
         logger.exception("Database health check failed.")
         return {"status": "disconnected"}
