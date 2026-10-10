@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger=logging.getLogger("cartela_bingo")
 BOT=os.getenv("TELEGRAM_BOT_TOKEN","").strip(); DB=os.getenv("DATABASE_URL","").strip()
 WEB=os.getenv("WEB_APP_URL","https://telegram-bingo-zq2q.onrender.com/app").strip()
-SUPPORT=os.getenv("SUPPORT_URL","").strip(); PAYKEY=os.getenv("PAYMENT_INGEST_API_KEY","").strip()
+SUPPORT=os.getenv("SUPPORT_URL","").strip(); PAYKEY=os.getenv("PAYMENT_INGEST_API_KEY","").strip(); OWNER_ID=os.getenv("PLATFORM_OWNER_TELEGRAM_ID","").strip()
 STATIC=Path(__file__).parent/"static"; STATIC.mkdir(exist_ok=True)
 engine=bot=None; ticker=None; lock=asyncio.Lock()
 g={"id":1,"status":"waiting","seconds":30,"called":[],"players":{},"winner":None,"seq":[],"last":0,"lobby_started_at":None,"finished_at_ts":0}
@@ -42,7 +42,11 @@ async def dbinit():
  "CREATE TABLE IF NOT EXISTS payment_records(id BIGSERIAL PRIMARY KEY,provider TEXT,external_reference TEXT UNIQUE,amount NUMERIC(14,2),payer_reference TEXT,memo TEXT,matched_request_id BIGINT,created_at TIMESTAMPTZ DEFAULT NOW())",
  "CREATE TABLE IF NOT EXISTS bingo_games(id BIGSERIAL PRIMARY KEY,status TEXT,created_at TIMESTAMPTZ DEFAULT NOW(),started_at TIMESTAMPTZ,finished_at TIMESTAMPTZ,winner_telegram_id BIGINT,called_numbers JSONB DEFAULT '[]'::jsonb)",
  "CREATE TABLE IF NOT EXISTS bingo_game_players(game_id BIGINT,telegram_id BIGINT,cartela_number INT,cartela JSONB,stake NUMERIC(14,2) DEFAULT 0,PRIMARY KEY(game_id,telegram_id),UNIQUE(game_id,cartela_number))",
- "ALTER TABLE bingo_games ADD COLUMN IF NOT EXISTS lobby_started_at TIMESTAMPTZ"
+ "ALTER TABLE bingo_games ADD COLUMN IF NOT EXISTS lobby_started_at TIMESTAMPTZ",
+ "CREATE TABLE IF NOT EXISTS bingo_game_entries(game_id BIGINT NOT NULL,telegram_id BIGINT NOT NULL,cartela_number INT NOT NULL,cartela JSONB NOT NULL,stake NUMERIC(14,2) NOT NULL DEFAULT 30,created_at TIMESTAMPTZ DEFAULT NOW(),PRIMARY KEY(game_id,cartela_number),UNIQUE(game_id,telegram_id,cartela_number))",
+ "CREATE TABLE IF NOT EXISTS bingo_platform_wallet(id INT PRIMARY KEY DEFAULT 1 CHECK(id=1),balance NUMERIC(14,2) NOT NULL DEFAULT 0,updated_at TIMESTAMPTZ DEFAULT NOW())",
+ "INSERT INTO bingo_platform_wallet(id,balance) VALUES(1,0) ON CONFLICT(id) DO NOTHING",
+ "INSERT INTO bingo_game_entries(game_id,telegram_id,cartela_number,cartela,stake) SELECT game_id,telegram_id,cartela_number,cartela,stake FROM bingo_game_players WHERE TRUE ON CONFLICT(game_id,cartela_number) DO NOTHING"
  ]
  async with engine.begin() as c:
   for q in qs: await c.execute(text(q))
@@ -52,10 +56,10 @@ async def dbinit():
    if g["status"]=="waiting": g["seconds"]=max(0,30-int(time.time()-(g["lobby_started_at"] or time.time()))) if g["lobby_started_at"] else 30
    else: g["seconds"]=0
    if g["status"]=="running": g["seq"]=[n for n in range(1,76) if n not in set(g["called"])];random.shuffle(g["seq"]);g["last"]=time.time()
-   pr=await c.execute(text("SELECT p.telegram_id,COALESCE(u.display_name,u.username,'Player'),p.cartela_number,p.cartela,p.stake FROM bingo_game_players p LEFT JOIN bingo_users u ON u.telegram_id=p.telegram_id WHERE p.game_id=:g"),{"g":g["id"]})
+   pr=await c.execute(text("SELECT p.telegram_id,COALESCE(u.display_name,u.username,'Player'),p.cartela_number,p.cartela,p.stake FROM bingo_game_entries p LEFT JOIN bingo_users u ON u.telegram_id=p.telegram_id WHERE p.game_id=:g"),{"g":g["id"]})
    for x in pr.fetchall():
     card=x[3] if isinstance(x[3],list) else json.loads(x[3] or '[]')
-    g["players"][int(x[0])] = {"name":x[1],"n":int(x[2]),"card":card,"stake":float(x[4] or 0)}
+    g["players"][f"{int(x[0])}:{int(x[2])}"] = {"user_id":int(x[0]),"name":x[1],"n":int(x[2]),"card":card,"stake":float(x[4] or 0)}
   else:
    g["id"]=(await c.execute(text("INSERT INTO bingo_games(status) VALUES('waiting') RETURNING id"))).scalar_one()
  logger.info("Database initialized; game #%s status=%s players=%s",g["id"],g["status"],len(g["players"]))
@@ -176,7 +180,7 @@ async def loop():
      if now-g["lobby_started_at"]>=30:
       g["status"]="running";g["seconds"]=0;g["seq"]=[n for n in range(1,76) if n not in set(g["called"])];random.shuffle(g["seq"]);g["last"]=now
       async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":g["id"]})
-      logger.info("Game #%s started with %s players",g["id"],len(g["players"]))
+      logger.info("Game #%s started with %s players",g["id"],len({p.get("user_id") for p in g["players"].values()}))
     elif g["status"]=="running" and now-g["last"]>=1.25:
      if g["seq"]:
       g["called"].append(g["seq"].pop(0));g["last"]=now
@@ -231,69 +235,90 @@ async def language(req:Request):
  await setlang(int(u["id"]),l);return {"ok":True}
 @app.get("/api/game")
 async def getgame(req:Request):
- u=await who(req)
+ u=await who(req);uid=int(u["id"])
  async with lock:
   if g["status"]=="waiting" and g["lobby_started_at"] is not None:
    g["seconds"]=max(0,math.ceil(30-(time.time()-g["lobby_started_at"])))
-  p=g["players"].get(int(u["id"]))
-  return {"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"players":[{"telegram_id":i,"name":x["name"],"cartela_number":x["n"]} for i,x in g["players"].items()],"player_count":len(g["players"]),"my_cartela":p["card"] if p else None,"my_cartela_number":p["n"] if p else None,"winner":g["winner"]}
+  entries=list(g["players"].values())
+  mine=[{"cartela":p["card"],"cartela_number":p["n"],"stake":p["stake"]} for p in entries if p.get("user_id")==uid]
+  users={p.get("user_id") for p in entries}
+  return {"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"players":[{"telegram_id":p.get("user_id"),"name":p["name"],"cartela_number":p["n"],"stake":p["stake"]} for p in entries],"player_count":len(users),"my_cartelas":mine,"my_cartela":mine[0]["cartela"] if mine else None,"my_cartela_number":mine[0]["cartela_number"] if mine else None,"winner":g["winner"]}
 class Join(BaseModel):
- cartela_number:int=Field(ge=1,le=200);stake:Decimal=Field(default=Decimal("0"),ge=0,le=Decimal("1000"))
+ cartela_numbers:list[int]=Field(default_factory=list)
+ cartela_number:Optional[int]=Field(default=None,ge=1,le=200)
+ stake:Decimal=Field(ge=Decimal("30"),le=Decimal("1000"))
 @app.post("/api/game/join")
 async def join(b:Join,req:Request):
- u=await who(req);i=int(u["id"])
+ u=await who(req);uid=int(u["id"])
+ nums=list(dict.fromkeys(b.cartela_numbers or ([b.cartela_number] if b.cartela_number else [])))
+ if not nums: raise HTTPException(400,"Select at least one cartela.")
+ if len(nums)>200 or any(n<1 or n>200 for n in nums): raise HTTPException(400,"Cartela numbers must be between 1 and 200.")
+ total=(b.stake*len(nums)).quantize(Decimal("0.01"))
  async with lock:
   if g["status"]!="waiting": raise HTTPException(409,"Lobby closed; wait for the next game.")
   if g["lobby_started_at"] is not None and time.time()-g["lobby_started_at"]>=30: raise HTTPException(409,"The 30-second lobby has closed. Please join the next game.")
-  if i in g["players"]: return {"ok":True,"cartela":g["players"][i]["card"],"cartela_number":g["players"][i]["n"]}
-  card=newcard()
+  already={p["n"] for p in g["players"].values() if p.get("user_id")==uid}
+  nums=[n for n in nums if n not in already]
+  if not nums: return {"ok":True,"cartelas":[{"cartela_number":p["n"],"cartela":p["card"]} for p in g["players"].values() if p.get("user_id")==uid],"lobby_seconds":g["seconds"]}
+  total=(b.stake*len(nums)).quantize(Decimal("0.01"))
+  cards={n:newcard() for n in nums}
   try:
    async with engine.begin() as c:
     game_row=(await c.execute(text("SELECT status,lobby_started_at FROM bingo_games WHERE id=:g FOR UPDATE"),{"g":g["id"]})).first()
     if not game_row or game_row[0]!="waiting": raise HTTPException(409,"Lobby closed; wait for the next game.")
-    taken=(await c.execute(text("SELECT 1 FROM bingo_game_players WHERE game_id=:g AND cartela_number=:n"),{"g":g["id"],"n":b.cartela_number})).first()
-    if taken: raise HTTPException(409,"Cartela already taken. Please choose an available number.")
-    if b.stake:
-     bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i FOR UPDATE"),{"i":i})).scalar_one_or_none()
-     pending=(await c.execute(text("SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE telegram_id=:i AND status='pending'"),{"i":i})).scalar_one() or 0
-     available=Decimal(str(bal or 0))-Decimal(str(pending))
-     if available<b.stake: raise HTTPException(402,"Insufficient available balance after pending withdrawals.")
-     await c.execute(text("UPDATE bingo_wallets SET balance=balance-:a,updated_at=NOW() WHERE telegram_id=:i"),{"a":b.stake,"i":i})
-     await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:i,'bet',:a,'verified','Bingo stake')"),{"i":i,"a":-b.stake})
-    await c.execute(text("INSERT INTO bingo_game_players(game_id,telegram_id,cartela_number,cartela,stake) VALUES(:g,:i,:n,CAST(:c AS jsonb),:s)"),{"g":g["id"],"i":i,"n":b.cartela_number,"c":json.dumps(card),"s":b.stake})
+    params={"g":g["id"]}; placeholders=[]
+    for ix,n in enumerate(nums):params[f"n{ix}"]=n;placeholders.append(f":n{ix}")
+    taken=(await c.execute(text("SELECT cartela_number FROM bingo_game_entries WHERE game_id=:g AND cartela_number IN ("+",".join(placeholders)+")"),params)).scalars().all()
+    if taken: raise HTTPException(409,"Cartela(s) just taken: "+", ".join(map(str,taken))+". Refresh and choose available numbers.")
+    bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i FOR UPDATE"),{"i":uid})).scalar_one_or_none() or 0
+    pending=(await c.execute(text("SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE telegram_id=:i AND status='pending'"),{"i":uid})).scalar_one() or 0
+    available=Decimal(str(bal))-Decimal(str(pending))
+    if available<total: raise HTTPException(402,f"Insufficient available balance. {len(nums)} cartela(s) at {b.stake} Birr each cost {total} Birr.")
+    await c.execute(text("UPDATE bingo_wallets SET balance=balance-:a,updated_at=NOW() WHERE telegram_id=:i"),{"a":total,"i":uid})
+    await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:i,'bet',:a,'verified',:d)"),{"i":uid,"a":-total,"d":f"Bingo bet: {len(nums)} cartela(s) at {b.stake} Birr each"})
+    for n,card in cards.items():
+     await c.execute(text("INSERT INTO bingo_game_entries(game_id,telegram_id,cartela_number,cartela,stake) VALUES(:g,:i,:n,CAST(:c AS jsonb),:s)"),{"g":g["id"],"i":uid,"n":n,"c":json.dumps(card),"s":b.stake})
     await c.execute(text("UPDATE bingo_games SET lobby_started_at=COALESCE(lobby_started_at,NOW()) WHERE id=:g"),{"g":g["id"]})
   except IntegrityError:
-   raise HTTPException(409,"That cartela was just taken. Choose another available number.")
-  g["players"][i]={"name":u.get("first_name","Player"),"n":b.cartela_number,"card":card,"stake":float(b.stake)}
+   raise HTTPException(409,"A selected cartela was just taken. Refresh and choose again.")
+  for n,card in cards.items():g["players"][f"{uid}:{n}"]={"user_id":uid,"name":u.get("first_name","Player"),"n":n,"card":card,"stake":float(b.stake)}
   if g["lobby_started_at"] is None:g["lobby_started_at"]=time.time()
   g["seconds"]=max(0,math.ceil(30-(time.time()-g["lobby_started_at"])))
-  return {"ok":True,"cartela":card,"cartela_number":b.cartela_number,"lobby_seconds":g["seconds"]}
+  return {"ok":True,"cartelas":[{"cartela_number":n,"cartela":cards[n]} for n in nums],"lobby_seconds":g["seconds"],"total_stake":float(total)}
 @app.post("/api/game/claim")
 async def claim(req:Request):
- u=await who(req);i=int(u["id"])
+ u=await who(req);uid=int(u["id"])
  try:
-  body=await req.json()
-  marked={int(x) for x in body.get("marked",[]) if str(x).isdigit()}
- except Exception:marked=set()
+  body=await req.json();number=int(body.get("cartela_number"));marked={int(x) for x in body.get("marked",[]) if str(x).isdigit()}
+ except Exception:raise HTTPException(400,"Choose the cartela you want to claim with.")
  async with lock:
   if g["status"]!="running":raise HTTPException(409,"Game is not running.")
-  p=g["players"].get(i)
-  if not p:raise HTTPException(400,"Join first.")
+  p=g["players"].get(f"{uid}:{number}")
+  if not p:raise HTTPException(400,"That cartela is not yours in this game.")
   line=winline(p["card"],g["called"])
-  if not line:raise HTTPException(400,"No valid line yet.")
+  if not line:raise HTTPException(400,"No valid line on this cartela yet.")
   valid_marked=(marked & set(g["called"])) | {0}
   lines=[[(r,c) for c in range(5)] for r in range(5)]+[[(r,c) for r in range(5)] for c in range(5)]+[[(i,i) for i in range(5)],[(i,4-i) for i in range(5)]]
   marked_line=next(([[r,c] for r,c in ln] for ln in lines if all(p["card"][r][c] in valid_marked for r,c in ln)),None)
   if not marked_line:raise HTTPException(400,"Mark every called number in a complete horizontal, vertical, or diagonal line first.")
-  line=marked_line
   if g["winner"]:raise HTTPException(409,"Another player already won.")
-  g["winner"]={"telegram_id":i,"name":p["name"],"cartela_number":p["n"],"pattern":line};g["status"]="finished";g["finished_at_ts"]=time.time();prize=sum(Decimal(str(x["stake"])) for x in g["players"].values())
+  entries=list(g["players"].values());pot=sum((Decimal(str(x["stake"])) for x in entries),Decimal("0.00"))
+  prize=(pot*Decimal("0.80")).quantize(Decimal("0.01"));commission=(pot-prize).quantize(Decimal("0.01"))
+  g["winner"]={"telegram_id":uid,"name":p["name"],"cartela_number":p["n"],"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"commission":float(commission)};g["status"]="finished";g["finished_at_ts"]=time.time()
   async with engine.begin() as c:
-   await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),winner_telegram_id=:u,called_numbers=CAST(:n AS jsonb) WHERE id=:g"),{"u":i,"n":json.dumps(g["called"]),"g":g["id"]})
+   await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),winner_telegram_id=:u,called_numbers=CAST(:n AS jsonb) WHERE id=:g"),{"u":uid,"n":json.dumps(g["called"]),"g":g["id"]})
    if prize:
-    await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a WHERE telegram_id=:u"),{"a":prize,"u":i})
-    await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:u,'win',:a,'verified','Bingo prize')"),{"u":i,"a":prize})
-  return {"ok":True,"pattern":line,"prize":float(prize)}
+    await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":prize,"u":uid})
+    await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:u,'win',:a,'verified',:d)"),{"u":uid,"a":prize,"d":f"Bingo prize (80% of {pot} Birr total bets)"})
+   if commission and OWNER_ID.isdigit():
+    owner=int(OWNER_ID)
+    await c.execute(text("INSERT INTO bingo_users(telegram_id,display_name) VALUES(:i,'Platform Owner') ON CONFLICT(telegram_id) DO NOTHING"),{"i":owner})
+    await c.execute(text("INSERT INTO bingo_wallets(telegram_id) VALUES(:i) ON CONFLICT(telegram_id) DO NOTHING"),{"i":owner})
+    await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:i"),{"a":commission,"i":owner})
+    await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:i,'platform_commission',:a,'verified',:d)"),{"i":owner,"a":commission,"d":f"20% platform commission from game #{g['id']}"})
+   elif commission:
+    await c.execute(text("UPDATE bingo_platform_wallet SET balance=balance+:a,updated_at=NOW() WHERE id=1"),{"a":commission})
+  return {"ok":True,"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"platform_commission":float(commission)}
 @app.get("/api/wallet")
 async def wallet(req:Request):
  u=await who(req);i=int(u["id"])
@@ -384,6 +409,6 @@ async def ws(ws:WebSocket):
   while True:
    async with lock:
     if g["status"]=="waiting" and g["lobby_started_at"] is not None:g["seconds"]=max(0,math.ceil(30-(time.time()-g["lobby_started_at"])))
-    d={"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"player_count":len(g["players"]),"winner":g["winner"]}
+    d={"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"player_count":len({p.get("user_id") for p in g["players"].values()}),"winner":g["winner"]}
    await ws.send_json(d);await asyncio.sleep(1)
  except (WebSocketDisconnect,RuntimeError):pass
