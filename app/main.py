@@ -34,6 +34,7 @@ async def dbinit():
  "CREATE TABLE IF NOT EXISTS bingo_wallets(telegram_id BIGINT PRIMARY KEY REFERENCES bingo_users(telegram_id),balance NUMERIC(14,2) DEFAULT 0,updated_at TIMESTAMPTZ DEFAULT NOW())",
  "CREATE TABLE IF NOT EXISTS bingo_transactions(id BIGSERIAL PRIMARY KEY,telegram_id BIGINT,transaction_type TEXT,amount NUMERIC(14,2),status TEXT DEFAULT 'pending',description TEXT,external_reference TEXT UNIQUE,created_at TIMESTAMPTZ DEFAULT NOW())",
  "CREATE TABLE IF NOT EXISTS bingo_referrals(id BIGSERIAL PRIMARY KEY,referrer_telegram_id BIGINT,referred_telegram_id BIGINT UNIQUE,created_at TIMESTAMPTZ DEFAULT NOW())",
+ "ALTER TABLE bingo_referrals ADD COLUMN IF NOT EXISTS referrer_telegram_id BIGINT",
  "CREATE TABLE IF NOT EXISTS deposit_requests(id BIGSERIAL PRIMARY KEY,telegram_id BIGINT,provider TEXT,amount NUMERIC(14,2),reference TEXT,status TEXT DEFAULT 'pending',created_at TIMESTAMPTZ DEFAULT NOW(),verified_at TIMESTAMPTZ)",
  "CREATE TABLE IF NOT EXISTS payment_records(id BIGSERIAL PRIMARY KEY,provider TEXT,external_reference TEXT UNIQUE,amount NUMERIC(14,2),payer_reference TEXT,memo TEXT,matched_request_id BIGINT,created_at TIMESTAMPTZ DEFAULT NOW())",
  "CREATE TABLE IF NOT EXISTS bingo_games(id BIGSERIAL PRIMARY KEY,status TEXT,created_at TIMESTAMPTZ DEFAULT NOW(),started_at TIMESTAMPTZ,finished_at TIMESTAMPTZ,winner_telegram_id BIGINT,called_numbers JSONB DEFAULT '[]'::jsonb)",
@@ -65,7 +66,7 @@ async def setlang(i,l):
  async with engine.begin() as c:await c.execute(text("UPDATE bingo_users SET language=:l WHERE telegram_id=:i"),{"l":l,"i":i})
 def kb(l):
  rows=[["🎮 Play Now","💰 Check Balance"],["➕ Make Deposit","🆘 Support"],["📖 Instructions","🏆 Win Patterns"],["✏️ Change Username","👥 Invite Friends"],["🥇 Leaderboard","📜 Transaction History"],["🌐 Change Language"]] if l=="en" else [["🎮 አሁን ይጫወቱ","💰 ቀሪ ሂሳብ"],["➕ ገንዘብ ያስገቡ","🆘 ድጋፍ"],["📖 መመሪያ","🏆 የማሸነፊያ ቅጦች"],["✏️ ስም ይቀይሩ","👥 ጓደኞችን ይጋብዙ"],["🥇 ደረጃ ሰንጠረዥ","📜 የግብይት ታሪክ"],["🌐 ቋንቋ ይቀይሩ"]]
- return ReplyKeyboardMarkup([[KeyboardButton(x) for x in r] for r in rows],resize_keyboard=True,one_time_keyboard=False,is_persistent=False)
+ return ReplyKeyboardMarkup([[KeyboardButton(x,web_app=WebAppInfo(url=WEB)) if x in ("🎮 Play Now","🎮 አሁን ይጫወቱ") else KeyboardButton(x) for x in r] for r in rows],resize_keyboard=True,one_time_keyboard=False,is_persistent=False)
 def wel(l):return ("🎉🎱 እንኳን ወደ Cartela Bingo በደህና መጡ!\n🇪🇹 የኢትዮጵያ ቀለሞች • ቢንጎ • ደስታ\n👇 ከታች ያለውን አዝራር ይምረጡ!" if l=="am" else "🎉🎱 Welcome to Cartela Bingo!\n🇪🇹 Ethiopian colors • Bingo • Fun\n👇 Choose an option below!")
 async def sendwel(up,l=None):
  l=l or await langof(up.effective_user.id); p=STATIC/"bingo.PNG"
@@ -135,15 +136,14 @@ async def loop():
       g["status"]="running";g["seconds"]=0;g["seq"]=[n for n in range(1,76) if n not in set(g["called"])];random.shuffle(g["seq"]);g["last"]=now
       async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":g["id"]})
       logger.info("Game #%s started with %s players",g["id"],len(g["players"]))
-    if g["status"]=="running" and now-g["last"]>=1.25:
+    elif g["status"]=="running" and now-g["last"]>=1.25:
      if g["seq"]:
       g["called"].append(g["seq"].pop(0));g["last"]=now
       async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET called_numbers=CAST(:n AS jsonb) WHERE id=:i AND status='running'"),{"n":json.dumps(g["called"]),"i":g["id"]})
-      logger.info("Game #%s called %s",g["id"],g["called"][-1])
      else:
       g["status"]="finished";g["finished_at_ts"]=now
       async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),called_numbers=CAST(:n AS jsonb) WHERE id=:i"),{"n":json.dumps(g["called"]),"i":g["id"]})
-    if g["status"]=="finished" and now-(g.get("finished_at_ts") or now)>=5:
+    elif g["status"]=="finished" and now-(g.get("finished_at_ts") or now)>=5:
      async with engine.begin() as c: gid=(await c.execute(text("INSERT INTO bingo_games(status) VALUES('waiting') RETURNING id"))).scalar_one()
      g.update(id=gid,status="waiting",seconds=30,called=[],players={},winner=None,seq=[],last=0,lobby_started_at=None,finished_at_ts=0)
      logger.info("New lobby opened: game #%s",gid)
@@ -152,7 +152,7 @@ async def loop():
 @asynccontextmanager
 async def lifespan(app):
  global bot,ticker
- await dbinit();ticker=asyncio.create_task(loop());logger.info("Bingo game loop started")
+ await dbinit();ticker=asyncio.create_task(loop())
  if BOT:
   bot=Application.builder().token(BOT).build();bot.add_handler(CommandHandler("start",start));bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,bottext));bot.add_error_handler(telegram_error_handler);await bot.initialize();await bot.bot.delete_webhook(drop_pending_updates=False);await bot.start()
   if bot.updater: await bot.updater.start_polling(drop_pending_updates=False)
