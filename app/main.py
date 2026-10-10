@@ -1,17 +1,19 @@
 
 import os
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from telegram import (
     Update,
+    KeyboardButton,
     ReplyKeyboardMarkup,
-    ReplyKeyboardRemove,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     WebAppInfo,
@@ -24,37 +26,45 @@ from telegram.ext import (
     filters,
 )
 
-# ==================================================
+# =========================================================
 # CONFIGURATION
-# ==================================================
+# =========================================================
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
-
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-WEB_APP_URL = os.getenv("WEB_APP_URL", "").strip()
+WEB_APP_URL = os.getenv(
+    "WEB_APP_URL",
+    "https://telegram-bingo-zq2q.onrender.com/app",
+).strip()
 SUPPORT_URL = os.getenv("SUPPORT_URL", "").strip()
+
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+LOGO_PATH = STATIC_DIR / "bingo.PNG"
+
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 engine = None
 telegram_app = None
 
 
-# ==================================================
-# BILINGUAL KEYBOARDS
-# ==================================================
+# =========================================================
+# KEYBOARDS
+# =========================================================
 
 MENUS = {
     "en": [
         ["🎮 Play Now", "💰 Check Balance"],
         ["➕ Make Deposit", "🆘 Support"],
         ["📖 Instructions", "🏆 Win Patterns"],
-        ["✏️ Change Username", "👥 Invite Friends"],
+        ["✏️ Change Username", "👥 Invite"],
         ["🥇 Leaderboard", "📜 Transaction History"],
         ["🌐 Change Language"],
     ],
@@ -69,7 +79,6 @@ MENUS = {
 }
 
 ACTIONS = {
-    # English
     "🎮 Play Now": "play",
     "💰 Check Balance": "balance",
     "➕ Make Deposit": "deposit",
@@ -77,12 +86,12 @@ ACTIONS = {
     "📖 Instructions": "instructions",
     "🏆 Win Patterns": "patterns",
     "✏️ Change Username": "username",
+    "👥 Invite": "invite",
     "👥 Invite Friends": "invite",
     "🥇 Leaderboard": "leaderboard",
     "📜 Transaction History": "history",
     "🌐 Change Language": "language",
 
-    # Amharic
     "🎮 አሁን ይጫወቱ": "play",
     "💰 ቀሪ ሂሳብ": "balance",
     "➕ ገንዘብ ያስገቡ": "deposit",
@@ -97,9 +106,95 @@ ACTIONS = {
 }
 
 
-# ==================================================
-# DATABASE SETUP
-# ==================================================
+def make_keyboard(language):
+    rows = []
+
+    for row in MENUS[language]:
+        buttons = []
+
+        for label in row:
+            if label in ("🎮 Play Now", "🎮 አሁን ይጫወቱ"):
+                buttons.append(
+                    KeyboardButton(
+                        text=label,
+                        web_app=WebAppInfo(url=WEB_APP_URL),
+                    )
+                )
+            else:
+                buttons.append(KeyboardButton(text=label))
+
+        rows.append(buttons)
+
+    return ReplyKeyboardMarkup(
+        rows,
+        resize_keyboard=True,
+        one_time_keyboard=False,
+        is_persistent=False,
+        input_field_placeholder=(
+            "Choose a Bingo option 🎱"
+            if language == "en"
+            else "የቢንጎ አማራጭ ይምረጡ 🎱"
+        ),
+    )
+
+
+# =========================================================
+# WELCOME MESSAGES
+# =========================================================
+
+def welcome_message(language):
+    if language == "am":
+        return (
+            "🎉🎱 እንኳን ወደ Cartela Bingo በደህና መጡ!\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "👋 ሰላም! ከእኛ ጋር ለመጫወት ዝግጁ ነዎት?\n\n"
+            "🎮 አሁን ይጫወቱ — ወደ ጨዋታው ይግቡ\n"
+            "💰 ቀሪ ሂሳብዎን ይመልከቱ\n"
+            "🏆 የማሸነፊያ ቅጦችን ይመልከቱ\n"
+            "👥 ጓደኞችዎን ይጋብዙ\n\n"
+            "👇 ከታች ካሉት አዝራሮች አንዱን ይጫኑ!\n\n"
+            "🎊 መልካም ጨዋታ!"
+        )
+
+    return (
+        "🎉🎱 Welcome to Cartela Bingo!\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "👋 Hello, Bingo player! Ready to join the fun?\n\n"
+        "🎮 Play Now — enter the Bingo app\n"
+        "💰 Check your balance\n"
+        "🏆 Explore winning patterns\n"
+        "👥 Invite your friends\n\n"
+        "👇 Tap any button on the keyboard below "
+        "to open the section you want!\n\n"
+        "🎊 Good luck and enjoy the game!"
+    )
+
+
+async def send_welcome(update: Update, language=None):
+    if language is None:
+        language = await get_language(update.effective_user.id)
+
+    message = update.effective_message
+    keyboard = make_keyboard(language)
+    caption = welcome_message(language)
+
+    if LOGO_PATH.is_file():
+        await message.reply_photo(
+            photo=str(LOGO_PATH),
+            caption=caption,
+            reply_markup=keyboard,
+        )
+    else:
+        logger.warning("Logo not found at %s", LOGO_PATH)
+        await message.reply_text(
+            caption,
+            reply_markup=keyboard,
+        )
+
+
+# =========================================================
+# DATABASE
+# =========================================================
 
 async def setup_database():
     global engine
@@ -176,15 +271,6 @@ async def setup_database():
 
 
 async def ensure_user(user):
-    if engine is None:
-        raise RuntimeError("Database is not initialized.")
-
-    default_language = (
-        "am"
-        if (user.language_code or "").lower().startswith("am")
-        else "en"
-    )
-
     async with engine.begin() as conn:
         await conn.execute(
             text("""
@@ -199,7 +285,11 @@ async def ensure_user(user):
                 "tid": user.id,
                 "username": user.username,
                 "display_name": user.first_name or "Player",
-                "language": default_language,
+                "language": (
+                    "am"
+                    if (user.language_code or "").lower().startswith("am")
+                    else "en"
+                ),
             },
         )
 
@@ -217,8 +307,7 @@ async def get_language(telegram_id):
     async with engine.connect() as conn:
         result = await conn.execute(
             text("""
-                SELECT language
-                FROM bingo_users
+                SELECT language FROM bingo_users
                 WHERE telegram_id = :tid
             """),
             {"tid": telegram_id},
@@ -236,7 +325,7 @@ async def set_language(telegram_id, language):
                 SET language = :language
                 WHERE telegram_id = :tid
             """),
-            {"tid": telegram_id, "language": language},
+            {"language": language, "tid": telegram_id},
         )
 
 
@@ -244,8 +333,7 @@ async def get_balance(telegram_id):
     async with engine.connect() as conn:
         result = await conn.execute(
             text("""
-                SELECT balance
-                FROM bingo_wallets
+                SELECT balance FROM bingo_wallets
                 WHERE telegram_id = :tid
             """),
             {"tid": telegram_id},
@@ -255,67 +343,9 @@ async def get_balance(telegram_id):
     return float(row[0]) if row else 0.0
 
 
-# ==================================================
-# KEYBOARD AND WELCOME MESSAGES
-# ==================================================
-
-def make_keyboard(language):
-    return ReplyKeyboardMarkup(
-        MENUS[language],
-        resize_keyboard=True,
-        one_time_keyboard=False,
-        is_persistent=False,
-        input_field_placeholder=(
-            "Choose a Bingo option 🎱"
-            if language == "en"
-            else "የቢንጎ አማራጭ ይምረጡ 🎱"
-        ),
-    )
-
-
-def welcome_message(language):
-    if language == "am":
-        return (
-            "🎉🎱 እንኳን ወደ Bingo በደህና መጡ!\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "👋 ሰላም! ከእኛ ጋር ለመጫወት ዝግጁ ነዎት?\n\n"
-            "🎮 አሁን ይጫወቱ\n"
-            "💰 ቀሪ ሂሳብዎን ይመልከቱ\n"
-            "🏆 የማሸነፊያ ቅጦችን ይመልከቱ\n"
-            "👥 ጓደኞችዎን ይጋብዙ\n\n"
-            "👇 ከታች ካሉት የቁልፍ ሰሌዳ አዝራሮች "
-            "አንዱን በመጫን ይቀጥሉ!\n\n"
-            "🌍 Welcome to Bingo! Choose a button below."
-        )
-
-    return (
-        "🎉🎱 Welcome to Bingo!\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "👋 Hello, Bingo player! Ready to join the fun?\n\n"
-        "🎮 Play a game\n"
-        "💰 Check your balance\n"
-        "🏆 Explore winning patterns\n"
-        "👥 Invite your friends\n\n"
-        "👇 Tap any button on the keyboard below "
-        "to open the section you want!\n\n"
-        "🇪🇹 እንኳን ወደ Bingo በደህና መጡ! "
-        "ከታች ያለውን አዝራር ይምረጡ።"
-    )
-
-
-async def show_menu(update: Update, language=None):
-    if language is None:
-        language = await get_language(update.effective_user.id)
-
-    await update.effective_message.reply_text(
-        welcome_message(language),
-        reply_markup=make_keyboard(language),
-    )
-
-
-# ==================================================
+# =========================================================
 # START COMMAND AND REFERRALS
-# ==================================================
+# =========================================================
 
 async def start_command(
     update: Update,
@@ -350,18 +380,12 @@ async def start_command(
             except ValueError:
                 logger.info("Invalid referral code.")
 
-    # Remove any old keyboard, then show the new dashboard keyboard.
-    await update.effective_message.reply_text(
-        "🎱 Bingo menu is ready!",
-        reply_markup=ReplyKeyboardRemove(),
-    )
-
-    await show_menu(update)
+    await send_welcome(update)
 
 
-# ==================================================
-# KEYBOARD BUTTON HANDLER
-# ==================================================
+# =========================================================
+# BUTTON HANDLER
+# =========================================================
 
 async def menu_handler(
     update: Update,
@@ -374,19 +398,17 @@ async def menu_handler(
     await ensure_user(user)
     language = await get_language(user.id)
 
-    # Handle a pending display-name change.
+    # Username entry
     if context.user_data.get("waiting_for_username"):
-        new_name = selected.strip()
-
         if selected.startswith("/"):
             context.user_data["waiting_for_username"] = False
             await message.reply_text(
-                "Name change cancelled."
-                if language == "en"
-                else "የስም ለውጡ ተሰርዟል።",
+                "Name change cancelled.",
                 reply_markup=make_keyboard(language),
             )
             return
+
+        new_name = selected.strip()
 
         if not new_name or len(new_name) > 100:
             await message.reply_text(
@@ -410,9 +432,11 @@ async def menu_handler(
         context.user_data["waiting_for_username"] = False
 
         await message.reply_text(
-            f"✅ Your display name is now: {new_name}"
-            if language == "en"
-            else f"✅ አዲሱ ስምዎ: {new_name}",
+            (
+                f"✅ Your display name is now: {new_name}"
+                if language == "en"
+                else f"✅ አዲሱ ስምዎ: {new_name}"
+            ),
             reply_markup=make_keyboard(language),
         )
         return
@@ -421,59 +445,41 @@ async def menu_handler(
 
     if not action:
         await message.reply_text(
-            "Please choose an option using the keyboard below. 👇"
+            "Please choose a button from the keyboard below. 👇"
             if language == "en"
-            else "እባክዎ ከታች ካለው የቁልፍ ሰሌዳ አማራጭ ይምረጡ። 👇",
+            else "እባክዎ ከታች ካለው የቁልፍ ሰሌዳ አዝራር ይምረጡ። 👇",
             reply_markup=make_keyboard(language),
         )
         return
 
-    # --------------------------------------------------
     # PLAY NOW
-    # --------------------------------------------------
     if action == "play":
-        if WEB_APP_URL:
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton(
-                    text=(
-                        "🎮 Open Bingo Game"
-                        if language == "en"
-                        else "🎮 ቢንጎን ይክፈቱ"
-                    ),
-                    web_app=WebAppInfo(url=WEB_APP_URL),
-                )
-            ]])
-
-            await message.reply_text(
-                (
-                    "🎱 Ready to play!\n"
-                    "Open the Bingo app below."
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                text=(
+                    "🎮 Open Bingo Game"
                     if language == "en"
-                    else
-                    "🎱 ለመጫወት ዝግጁ ነዎት!\n"
-                    "ከታች ያለውን የቢንጎ መተግበሪያ ይክፈቱ።"
+                    else "🎮 ቢንጎን ይክፈቱ"
                 ),
-                reply_markup=keyboard,
+                web_app=WebAppInfo(url=WEB_APP_URL),
             )
-        else:
-            await message.reply_text(
-                (
-                    "🎮 The Bingo game is being prepared. "
-                    "The game lobby is not available yet."
-                    if language == "en"
-                    else
-                    "🎮 የቢንጎ ጨዋታ እየተዘጋጀ ነው። "
-                    "የጨዋታ ሎቢው ገና አልተዘጋጀም።"
-                ),
-                reply_markup=make_keyboard(language),
-            )
+        ]])
 
-    # --------------------------------------------------
-    # CHECK BALANCE
-    # --------------------------------------------------
+        await message.reply_text(
+            (
+                "🎱 Welcome to the Bingo game!\n"
+                "Tap below to open the Mini App."
+                if language == "en"
+                else
+                "🎱 ወደ ቢንጎ ጨዋታ እንኳን በደህና መጡ!\n"
+                "Mini App ለመክፈት ከታች ይጫኑ።"
+            ),
+            reply_markup=keyboard,
+        )
+
+    # BALANCE
     elif action == "balance":
         balance = await get_balance(user.id)
-
         await message.reply_text(
             (
                 f"💰 Your Bingo balance: {balance:,.2f} Birr\n"
@@ -486,126 +492,100 @@ async def menu_handler(
             reply_markup=make_keyboard(language),
         )
 
-    # --------------------------------------------------
     # DEPOSIT
-    # --------------------------------------------------
     elif action == "deposit":
         await message.reply_text(
             (
                 "➕ Deposits are not enabled yet.\n\n"
-                "🛡️ Please do not send money to anyone claiming "
-                "to deposit funds into this bot. Payment verification "
-                "must be configured first."
+                "🛡️ Do not send money until official payment "
+                "verification has been configured."
                 if language == "en"
                 else
-                "➕ የገንዘብ ማስገባት አገልግሎት ገና አልተጀመረም።\n\n"
-                "🛡️ የክፍያ ማረጋገጫ እስኪዘጋጅ ድረስ "
-                "ለማንም ገንዘብ አይላኩ።"
+                "➕ የገንዘብ ማስገባት ገና አልተጀመረም።\n\n"
+                "🛡️ ይፋዊ የክፍያ ማረጋገጫ እስኪዘጋጅ ድረስ "
+                "ገንዘብ አይላኩ።"
             ),
             reply_markup=make_keyboard(language),
         )
 
-    # --------------------------------------------------
     # SUPPORT
-    # --------------------------------------------------
     elif action == "support":
         if SUPPORT_URL:
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton(
-                    text=(
-                        "🆘 Contact Support"
-                        if language == "en"
-                        else "🆘 ድጋፍን ያግኙ"
-                    ),
-                    url=SUPPORT_URL,
-                )
-            ]])
-
             await message.reply_text(
                 (
-                    "🆘 Need help? Tap below to contact support."
+                    "🆘 Tap below to contact support."
                     if language == "en"
-                    else "🆘 እገዛ ይፈልጋሉ? ድጋፍን ለማግኘት ከታች ይጫኑ።"
+                    else "🆘 ድጋፍን ለማግኘት ከታች ይጫኑ።"
                 ),
-                reply_markup=keyboard,
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton(
+                        text="🆘 Contact Support",
+                        url=SUPPORT_URL,
+                    )
+                ]]),
             )
         else:
             await message.reply_text(
-                (
-                    "🆘 Support contact has not been configured yet."
-                    if language == "en"
-                    else "🆘 የድጋፍ አድራሻ ገና አልተዘጋጀም።"
-                ),
+                "🆘 Support contact has not been configured yet."
+                if language == "en"
+                else "🆘 የድጋፍ አድራሻ ገና አልተዘጋጀም።",
                 reply_markup=make_keyboard(language),
             )
 
-    # --------------------------------------------------
     # INSTRUCTIONS
-    # --------------------------------------------------
     elif action == "instructions":
         await message.reply_text(
             (
                 "📖 HOW TO PLAY BINGO\n\n"
-                "1️⃣ Open Play Now.\n"
-                "2️⃣ Choose an available cartela.\n"
-                "3️⃣ Select a stake when games are enabled.\n"
+                "1️⃣ Press Play Now to open the Mini App.\n"
+                "2️⃣ Choose an available cartela when the game is ready.\n"
+                "3️⃣ Select a stake when betting is enabled.\n"
                 "4️⃣ Watch the called numbers.\n"
                 "5️⃣ Claim Bingo when your card matches a valid pattern.\n\n"
-                "🛡️ Never pay outside the official verified payment process."
+                "🛡️ Always use official, verified payment channels."
                 if language == "en"
                 else
                 "📖 ቢንጎ እንዴት ይጫወታሉ?\n\n"
-                "1️⃣ አሁን ይጫወቱን ይክፈቱ።\n"
-                "2️⃣ ያልተያዘ ካርቴላ ይምረጡ።\n"
-                "3️⃣ ጨዋታዎች ሲጀምሩ የውርርድ መጠን ይምረጡ።\n"
+                "1️⃣ Mini App ለመክፈት አሁን ይጫወቱን ይጫኑ።\n"
+                "2️⃣ ጨዋታው ሲዘጋጅ ያልተያዘ ካርቴላ ይምረጡ።\n"
+                "3️⃣ ውርርድ ሲነቃ የውርርድ መጠን ይምረጡ።\n"
                 "4️⃣ የሚጠሩትን ቁጥሮች ይከታተሉ።\n"
-                "5️⃣ ትክክለኛ የማሸነፊያ ቅጥ ሲሞላ ቢንጎ ይጠይቁ።\n\n"
-                "🛡️ ከተረጋገጠው የክፍያ ሂደት ውጭ ገንዘብ አይክፈሉ።"
+                "5️⃣ ትክክለኛ ቅጥ ሲሞላ ቢንጎ ይጠይቁ።\n\n"
+                "🛡️ ይፋዊ የክፍያ መንገዶችን ብቻ ይጠቀሙ።"
             ),
             reply_markup=make_keyboard(language),
         )
 
-    # --------------------------------------------------
     # WIN PATTERNS
-    # --------------------------------------------------
     elif action == "patterns":
         await message.reply_text(
             (
                 "🏆 WINNING PATTERNS\n\n"
-                "The official winning-pattern guide will appear here "
-                "when it is configured. Claims must be validated "
-                "by the server before a prize is awarded."
+                "The official winning-pattern guide will be added "
+                "when the game patterns are configured."
                 if language == "en"
                 else
                 "🏆 የማሸነፊያ ቅጦች\n\n"
-                "ይፋዊው የማሸነፊያ ቅጦች መመሪያ ሲዘጋጅ እዚህ "
-                "ይታያል። ሽልማት ከመሰጠቱ በፊት ጥያቄው "
-                "በሰርቨሩ መረጋገጥ አለበት።"
+                "የጨዋታው ቅጦች ሲዘጋጁ ይፋዊው መመሪያ እዚህ ይታያል።"
             ),
             reply_markup=make_keyboard(language),
         )
 
-    # --------------------------------------------------
-    # CHANGE DISPLAY NAME
-    # --------------------------------------------------
+    # CHANGE USERNAME
     elif action == "username":
         context.user_data["waiting_for_username"] = True
-
         await message.reply_text(
             (
-                "✏️ Send the display name you want to use "
+                "✏️ Send your preferred display name "
                 "(maximum 100 characters)."
                 if language == "en"
-                else
-                "✏️ መጠቀም የሚፈልጉትን የሚታይ ስም ይላኩ "
-                "(ከፍተኛው 100 ቁምፊ)።"
+                else "✏️ መጠቀም የሚፈልጉትን ስም ይላኩ "
+                     "(ከፍተኛው 100 ቁምፊ)።"
             ),
             reply_markup=make_keyboard(language),
         )
 
-    # --------------------------------------------------
     # INVITE FRIENDS
-    # --------------------------------------------------
     elif action == "invite":
         bot_username = context.bot.username
 
@@ -613,7 +593,6 @@ async def menu_handler(
             referral_link = (
                 f"https://t.me/{bot_username}?start=ref_{user.id}"
             )
-
             await message.reply_text(
                 (
                     "👥 INVITE FRIENDS\n\n"
@@ -631,31 +610,26 @@ async def menu_handler(
             )
         else:
             await message.reply_text(
-                "The bot username is not available yet.",
+                "Bot username is not available yet.",
                 reply_markup=make_keyboard(language),
             )
 
-    # --------------------------------------------------
     # LEADERBOARD
-    # --------------------------------------------------
     elif action == "leaderboard":
         await message.reply_text(
             (
                 "🥇 LEADERBOARD\n\n"
                 "The leaderboard will be available when the game "
-                "and verified scoring system are enabled."
+                "and scoring system are implemented."
                 if language == "en"
                 else
                 "🥇 የደረጃ ሰንጠረዥ\n\n"
-                "ጨዋታውና የተረጋገጠው የነጥብ ስርዓት ሲጀምሩ "
-                "የደረጃ ሰንጠረዡ ይታያል።"
+                "ጨዋታውና የነጥብ ስርዓቱ ሲዘጋጁ ይገኛል።"
             ),
             reply_markup=make_keyboard(language),
         )
 
-    # --------------------------------------------------
     # TRANSACTION HISTORY
-    # --------------------------------------------------
     elif action == "history":
         async with engine.connect() as conn:
             result = await conn.execute(
@@ -683,11 +657,10 @@ async def menu_handler(
                 else "📜 የቅርብ ጊዜ ግብይቶች\n\n"
             )
 
-            for transaction_type, amount, status, created_at in rows:
+            for tx_type, amount, status, created_at in rows:
                 history_text += (
-                    f"• {transaction_type} | "
-                    f"{float(amount):,.2f} Birr | "
-                    f"{status} | {created_at:%Y-%m-%d %H:%M}\n"
+                    f"• {tx_type} | {float(amount):,.2f} Birr "
+                    f"| {status} | {created_at:%Y-%m-%d %H:%M}\n"
                 )
 
         await message.reply_text(
@@ -695,34 +668,19 @@ async def menu_handler(
             reply_markup=make_keyboard(language),
         )
 
-    # --------------------------------------------------
     # CHANGE LANGUAGE
-    # --------------------------------------------------
     elif action == "language":
         new_language = "am" if language == "en" else "en"
         await set_language(user.id, new_language)
-
-        await message.reply_text(
-            (
-                "🌐 Language changed to English."
-                if new_language == "en"
-                else "🌐 ቋንቋው ወደ አማርኛ ተቀይሯል።"
-            ),
-            reply_markup=make_keyboard(new_language),
-        )
-
-        await message.reply_text(
-            welcome_message(new_language),
-            reply_markup=make_keyboard(new_language),
-        )
+        await send_welcome(update, new_language)
 
 
-# ==================================================
-# BOT STARTUP AND SHUTDOWN
-# ==================================================
+# =========================================================
+# FASTAPI LIFESPAN / TELEGRAM POLLING
+# =========================================================
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app):
     global telegram_app
 
     await setup_database()
@@ -753,11 +711,9 @@ async def lifespan(app: FastAPI):
                 drop_pending_updates=False
             )
 
-        logger.info("Telegram bot polling has started.")
+        logger.info("Telegram bot started.")
     else:
-        logger.warning(
-            "TELEGRAM_BOT_TOKEN is missing. Bot polling is disabled."
-        )
+        logger.warning("TELEGRAM_BOT_TOKEN is missing.")
 
     yield
 
@@ -772,14 +728,20 @@ async def lifespan(app: FastAPI):
         await engine.dispose()
 
 
-# ==================================================
-# FASTAPI WEB SERVICE
-# ==================================================
+# =========================================================
+# FASTAPI APPLICATION
+# =========================================================
 
 app = FastAPI(
-    title="Telegram Bingo",
-    description="Telegram Bingo bot and backend",
+    title="Cartela Bingo",
+    description="Telegram Bingo bot and Mini App",
     lifespan=lifespan,
+)
+
+app.mount(
+    "/static",
+    StaticFiles(directory=str(STATIC_DIR)),
+    name="static",
 )
 
 
@@ -791,7 +753,7 @@ async def home():
     <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>Telegram Bingo</title>
+      <title>Cartela Bingo</title>
       <style>
         body {
           margin: 0;
@@ -799,31 +761,129 @@ async def home():
           display: flex;
           align-items: center;
           justify-content: center;
-          background: linear-gradient(135deg, #101a43, #54228c);
+          background: linear-gradient(135deg, #101923, #25204e);
           color: white;
           font-family: Arial, sans-serif;
           text-align: center;
         }
-        main {
-          padding: 32px;
-          max-width: 480px;
-        }
-        h1 {
-          font-size: 38px;
-        }
-        p {
-          line-height: 1.7;
-          color: #e5e7eb;
-        }
+        main { padding: 24px; max-width: 480px; }
+        img { width: 100%; max-width: 320px; border-radius: 16px; }
       </style>
     </head>
     <body>
       <main>
-        <h1>🎱 Telegram Bingo</h1>
-        <p>Welcome to Bingo! Open your Telegram bot to use the
-        dashboard and its keyboard.</p>
-        <p>🎮 Play · 💰 Balance · 🏆 Patterns · 👥 Invite</p>
+        <img src="/static/bingo.PNG" alt="Cartela Bingo logo">
+        <h1>🎉 Welcome to Cartela Bingo!</h1>
+        <p>Open your Telegram bot to access the Bingo dashboard.</p>
       </main>
+    </body>
+    </html>
+    """
+
+
+@app.get("/app", response_class=HTMLResponse)
+async def mini_app():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport"
+            content="width=device-width, initial-scale=1, maximum-scale=1">
+      <script src="https://telegram.org/js/telegram-web-app.js"></script>
+      <title>Cartela Bingo</title>
+      <style>
+        * { box-sizing: border-box; }
+        body {
+          margin: 0;
+          padding: 20px;
+          background: #101923;
+          color: #ffffff;
+          font-family: Arial, sans-serif;
+          text-align: center;
+        }
+        .logo {
+          display: block;
+          width: 100%;
+          max-width: 340px;
+          max-height: 220px;
+          object-fit: contain;
+          margin: 0 auto 20px;
+          border-radius: 16px;
+        }
+        h1 { font-size: 26px; }
+        p { color: #cbd5e1; line-height: 1.6; }
+        .menu {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 12px;
+          margin-top: 24px;
+        }
+        button {
+          width: 100%;
+          min-height: 56px;
+          padding: 14px 8px;
+          border: 1px solid #35475a;
+          border-radius: 12px;
+          background: #223244;
+          color: white;
+          font-size: 15px;
+          font-weight: 600;
+        }
+        button.primary {
+          grid-column: 1 / -1;
+          background: #7c3aed;
+          border: none;
+        }
+        .note { font-size: 12px; margin-top: 24px; }
+      </style>
+    </head>
+    <body>
+      <img class="logo" src="/static/bingo.PNG" alt="Cartela Bingo logo">
+      <h1>🎉 Cartela Bingo</h1>
+      <p>🎱 Welcome! Choose an option below.</p>
+
+      <div class="menu">
+        <button class="primary" onclick="showNotice()">
+          🎮 Enter Bingo Lobby
+        </button>
+        <button onclick="showNotice()">
+          💰 Check Balance
+        </button>
+        <button onclick="showNotice()">
+          🏆 Win Patterns
+        </button>
+        <button onclick="showNotice()">
+          👥 Invite Friends
+        </button>
+        <button onclick="showNotice()">
+          📖 Instructions
+        </button>
+      </div>
+
+      <p class="note">
+        The live game, wallet and payment features still need to be connected.
+      </p>
+
+      <script>
+        const tg = window.Telegram && window.Telegram.WebApp;
+
+        if (tg) {
+          tg.ready();
+          tg.expand();
+        }
+
+        function showNotice() {
+          const message =
+            "This feature is not connected yet. The game backend " +
+            "must be implemented before you can play.";
+          if (tg && tg.showAlert) {
+            tg.showAlert(message);
+          } else {
+            alert(message);
+          }
+        }
+      </script>
     </body>
     </html>
     """
