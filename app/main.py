@@ -1,4 +1,4 @@
-import os,json,asyncio,random,hmac,hashlib,urllib.parse,time,secrets,logging
+import os,json,asyncio,random,hmac,hashlib,urllib.parse,time,secrets,logging,math
 from contextlib import asynccontextmanager
 from pathlib import Path
 from decimal import Decimal
@@ -8,17 +8,18 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel,Field
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 from telegram import Update,KeyboardButton,ReplyKeyboardMarkup,WebAppInfo,InlineKeyboardMarkup,InlineKeyboardButton
 from telegram.ext import Application,CommandHandler,MessageHandler,ContextTypes,filters
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-logger = logging.getLogger("cartela_bingo")
+logger=logging.getLogger("cartela_bingo")
 BOT=os.getenv("TELEGRAM_BOT_TOKEN","").strip(); DB=os.getenv("DATABASE_URL","").strip()
 WEB=os.getenv("WEB_APP_URL","https://telegram-bingo-zq2q.onrender.com/app").strip()
 SUPPORT=os.getenv("SUPPORT_URL","").strip(); PAYKEY=os.getenv("PAYMENT_INGEST_API_KEY","").strip()
 STATIC=Path(__file__).parent/"static"; STATIC.mkdir(exist_ok=True)
 engine=bot=None; ticker=None; lock=asyncio.Lock()
-g={"id":1,"status":"waiting","seconds":30,"called":[],"players":{},"winner":None,"seq":[],"last":0}
+g={"id":1,"status":"waiting","seconds":30,"called":[],"players":{},"winner":None,"seq":[],"last":0,"lobby_started_at":None,"finished_at_ts":0}
 PROVIDERS={"telebirr","cbe_birr","ebirr","cbe_bank"}
 def dsn(x):
  if x.startswith("postgres://"): return x.replace("postgres://","postgresql+asyncpg://",1)
@@ -36,12 +37,24 @@ async def dbinit():
  "CREATE TABLE IF NOT EXISTS deposit_requests(id BIGSERIAL PRIMARY KEY,telegram_id BIGINT,provider TEXT,amount NUMERIC(14,2),reference TEXT,status TEXT DEFAULT 'pending',created_at TIMESTAMPTZ DEFAULT NOW(),verified_at TIMESTAMPTZ)",
  "CREATE TABLE IF NOT EXISTS payment_records(id BIGSERIAL PRIMARY KEY,provider TEXT,external_reference TEXT UNIQUE,amount NUMERIC(14,2),payer_reference TEXT,memo TEXT,matched_request_id BIGINT,created_at TIMESTAMPTZ DEFAULT NOW())",
  "CREATE TABLE IF NOT EXISTS bingo_games(id BIGSERIAL PRIMARY KEY,status TEXT,created_at TIMESTAMPTZ DEFAULT NOW(),started_at TIMESTAMPTZ,finished_at TIMESTAMPTZ,winner_telegram_id BIGINT,called_numbers JSONB DEFAULT '[]'::jsonb)",
- "CREATE TABLE IF NOT EXISTS bingo_game_players(game_id BIGINT,telegram_id BIGINT,cartela_number INT,cartela JSONB,stake NUMERIC(14,2) DEFAULT 0,PRIMARY KEY(game_id,telegram_id),UNIQUE(game_id,cartela_number))"]
+ "CREATE TABLE IF NOT EXISTS bingo_game_players(game_id BIGINT,telegram_id BIGINT,cartela_number INT,cartela JSONB,stake NUMERIC(14,2) DEFAULT 0,PRIMARY KEY(game_id,telegram_id),UNIQUE(game_id,cartela_number))",
+ "ALTER TABLE bingo_games ADD COLUMN IF NOT EXISTS lobby_started_at TIMESTAMPTZ"
+ ]
  async with engine.begin() as c:
   for q in qs: await c.execute(text(q))
-  r=await c.execute(text("SELECT id,status,called_numbers FROM bingo_games WHERE status IN ('waiting','running') ORDER BY id DESC LIMIT 1")); row=r.first()
-  if row:g.update(id=row[0],status=row[1],called=row[2] or [])
-  else:g["id"]=(await c.execute(text("INSERT INTO bingo_games(status) VALUES('waiting') RETURNING id"))).scalar_one()
+  r=await c.execute(text("SELECT id,status,called_numbers,lobby_started_at,started_at,finished_at,winner_telegram_id FROM bingo_games WHERE status IN ('waiting','running') ORDER BY id DESC LIMIT 1")); row=r.first()
+  if row:
+   g.update(id=row[0],status=row[1],called=row[2] or [],lobby_started_at=row[3].timestamp() if row[3] else None,finished_at_ts=0)
+   if g["status"]=="waiting": g["seconds"]=max(0,30-int(time.time()-(g["lobby_started_at"] or time.time()))) if g["lobby_started_at"] else 30
+   else: g["seconds"]=0
+   if g["status"]=="running": g["seq"]=[n for n in range(1,76) if n not in set(g["called"])];random.shuffle(g["seq"]);g["last"]=time.time()
+   pr=await c.execute(text("SELECT p.telegram_id,COALESCE(u.display_name,u.username,'Player'),p.cartela_number,p.cartela,p.stake FROM bingo_game_players p LEFT JOIN bingo_users u ON u.telegram_id=p.telegram_id WHERE p.game_id=:g"),{"g":g["id"]})
+   for x in pr.fetchall():
+    card=x[3] if isinstance(x[3],list) else json.loads(x[3] or '[]')
+    g["players"][int(x[0])] = {"name":x[1],"n":int(x[2]),"card":card,"stake":float(x[4] or 0)}
+  else:
+   g["id"]=(await c.execute(text("INSERT INTO bingo_games(status) VALUES('waiting') RETURNING id"))).scalar_one()
+ logger.info("Database initialized; game #%s status=%s players=%s",g["id"],g["status"],len(g["players"]))
 async def reg(tid,username=None,name=None,language="en"):
  async with engine.begin() as c:
   await c.execute(text("INSERT INTO bingo_users(telegram_id,username,display_name,language) VALUES(:i,:u,:n,:l) ON CONFLICT(telegram_id) DO UPDATE SET username=COALESCE(EXCLUDED.username,bingo_users.username),display_name=COALESCE(EXCLUDED.display_name,bingo_users.display_name)"),{"i":tid,"u":username,"n":name,"l":language})
@@ -55,21 +68,14 @@ def kb(l):
  return ReplyKeyboardMarkup([[KeyboardButton(x,web_app=WebAppInfo(url=WEB)) if x in ("🎮 Play Now","🎮 አሁን ይጫወቱ") else KeyboardButton(x) for x in r] for r in rows],resize_keyboard=True,one_time_keyboard=False,is_persistent=False)
 def wel(l):return ("🎉🎱 እንኳን ወደ Cartela Bingo በደህና መጡ!\n🇪🇹 የኢትዮጵያ ቀለሞች • ቢንጎ • ደስታ\n👇 ከታች ያለውን አዝራር ይምረጡ!" if l=="am" else "🎉🎱 Welcome to Cartela Bingo!\n🇪🇹 Ethiopian colors • Bingo • Fun\n👇 Choose an option below!")
 async def sendwel(up,l=None):
- l=l or await langof(up.effective_user.id)
- p=STATIC/"bingo.PNG"
+ l=l or await langof(up.effective_user.id); p=STATIC/"bingo.PNG"
  if p.exists():
-  try:
-   await up.effective_message.reply_photo(
-    photo=str(p), caption=wel(l), reply_markup=kb(l)
-   )
-   return
-  except Exception:
-   logger.exception("Welcome image failed; sending text fallback")
+  try: await up.effective_message.reply_photo(str(p),caption=wel(l),reply_markup=kb(l));return
+  except Exception: logger.exception("Welcome image failed; sending text fallback")
  await up.effective_message.reply_text(wel(l),reply_markup=kb(l))
 async def start(up,ctx):
- u=up.effective_user
  logger.info("Received /start update")
- await reg(u.id,u.username,u.first_name,"am" if (u.language_code or "").startswith("am") else "en")
+ u=up.effective_user; await reg(u.id,u.username,u.first_name,"am" if (u.language_code or "").startswith("am") else "en")
  if ctx.args and ctx.args[0].startswith("ref_"):
   try:
    r=int(ctx.args[0][4:])
@@ -78,7 +84,8 @@ async def start(up,ctx):
   except ValueError:pass
  await sendwel(up)
 async def bottext(up,ctx):
- u=up.effective_user;m=up.effective_message;s=(m.text or "").strip();logger.info("Received a non-command text update");await reg(u.id,u.username,u.first_name);l=await langof(u.id)
+ logger.info("Received non-command text update")
+ u=up.effective_user;m=up.effective_message;s=(m.text or "").strip();await reg(u.id,u.username,u.first_name);l=await langof(u.id)
  if ctx.user_data.get("rename"):
   async with engine.begin() as c:await c.execute(text("UPDATE bingo_users SET display_name=:n WHERE telegram_id=:i"),{"n":s[:100],"i":u.id})
   ctx.user_data["rename"]=False;await m.reply_text("✅ Name updated.",reply_markup=kb(l));return
@@ -118,52 +125,46 @@ def winline(card,called):
 async def loop():
  while True:
   await asyncio.sleep(1)
-  async with lock:
-   if g["status"]=="waiting" and g["players"]:
-    g["seconds"]-=1
-    if g["seconds"]<=0:
-     g["status"]="running";g["seq"]=random.sample(range(1,76),75);g["last"]=time.time()
-     async with engine.begin() as c:await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i"),{"i":g["id"]})
-   elif g["status"]=="running" and time.time()-g["last"]>=5:
-    if g["seq"]:
-     g["called"].append(g["seq"].pop(0));g["last"]=time.time()
-     async with engine.begin() as c:await c.execute(text("UPDATE bingo_games SET called_numbers=CAST(:n AS jsonb) WHERE id=:i"),{"n":json.dumps(g["called"]),"i":g["id"]})
-    else:g["status"]="finished"
-   elif g["status"]=="finished":
-    async with engine.begin() as c:gid=(await c.execute(text("INSERT INTO bingo_games(status) VALUES('waiting') RETURNING id"))).scalar_one()
-    g.update(id=gid,status="waiting",seconds=30,called=[],players={},winner=None,seq=[],last=0)
-async def telegram_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
- logger.error("Telegram update processing failed", exc_info=context.error)
-
+  try:
+   async with lock:
+    now=time.time()
+    if g["status"]=="waiting" and g["players"]:
+     if g["lobby_started_at"] is None: g["lobby_started_at"]=now
+     g["seconds"]=max(0,math.ceil(30-(now-g["lobby_started_at"])))
+     if now-g["lobby_started_at"]>=30:
+      g["status"]="running";g["seconds"]=0;g["seq"]=[n for n in range(1,76) if n not in set(g["called"])];random.shuffle(g["seq"]);g["last"]=now
+      async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":g["id"]})
+      logger.info("Game #%s started with %s players",g["id"],len(g["players"]))
+    if g["status"]=="running" and now-g["last"]>=1.25:
+     if g["seq"]:
+      g["called"].append(g["seq"].pop(0));g["last"]=now
+      async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET called_numbers=CAST(:n AS jsonb) WHERE id=:i AND status='running'"),{"n":json.dumps(g["called"]),"i":g["id"]})
+      logger.info("Game #%s called %s",g["id"],g["called"][-1])
+     else:
+      g["status"]="finished";g["finished_at_ts"]=now
+      async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),called_numbers=CAST(:n AS jsonb) WHERE id=:i"),{"n":json.dumps(g["called"]),"i":g["id"]})
+    if g["status"]=="finished" and now-(g.get("finished_at_ts") or now)>=5:
+     async with engine.begin() as c: gid=(await c.execute(text("INSERT INTO bingo_games(status) VALUES('waiting') RETURNING id"))).scalar_one()
+     g.update(id=gid,status="waiting",seconds=30,called=[],players={},winner=None,seq=[],last=0,lobby_started_at=None,finished_at_ts=0)
+     logger.info("New lobby opened: game #%s",gid)
+  except asyncio.CancelledError: raise
+  except Exception: logger.exception("Game loop error")
 @asynccontextmanager
 async def lifespan(app):
  global bot,ticker
- await dbinit()
- ticker=asyncio.create_task(loop())
+ await dbinit();ticker=asyncio.create_task(loop());logger.info("Bingo game loop started")
  if BOT:
-  logger.info("Starting Telegram bot polling")
-  bot=Application.builder().token(BOT).build()
-  bot.add_handler(CommandHandler("start",start))
-  bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,bottext))
-  bot.add_error_handler(telegram_error_handler)
-  await bot.initialize()
-  # This service uses long polling, so remove any old webhook configuration first.
-  # Pending updates are preserved.
-  await bot.bot.delete_webhook(drop_pending_updates=False)
-  await bot.start()
-  if bot.updater:
-   await bot.updater.start_polling(drop_pending_updates=False)
-   logger.info("Telegram polling started successfully")
-  else:
-   logger.error("Telegram polling did not start: updater is unavailable")
- else:
-  logger.error("TELEGRAM_BOT_TOKEN is empty; Telegram bot is disabled")
+  bot=Application.builder().token(BOT).build();bot.add_handler(CommandHandler("start",start));bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,bottext));bot.add_error_handler(telegram_error_handler);await bot.initialize();await bot.bot.delete_webhook(drop_pending_updates=False);await bot.start()
+  if bot.updater: await bot.updater.start_polling(drop_pending_updates=False)
+  logger.info("Telegram polling started successfully")
+ else: logger.error("TELEGRAM_BOT_TOKEN is missing")
  yield
  if ticker:ticker.cancel()
  if bot:
   if bot.updater:await bot.updater.stop()
   await bot.stop();await bot.shutdown()
  if engine:await engine.dispose()
+async def telegram_error_handler(update,context): logger.error("Telegram update processing failed",exc_info=context.error)
 app=FastAPI(title="Cartela Bingo",lifespan=lifespan);app.mount("/static",StaticFiles(directory=str(STATIC)),name="static")
 @app.get("/")
 async def root():return {"app":"Cartela Bingo","mini_app":"/app","health":"/health"}
@@ -191,25 +192,39 @@ async def language(req:Request):
 async def getgame(req:Request):
  u=await who(req)
  async with lock:
-  p=g["players"].get(int(u["id"]));return {"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"players":[{"telegram_id":i,"name":x["name"],"cartela_number":x["n"]} for i,x in g["players"].items()],"player_count":len(g["players"]),"my_cartela":p["card"] if p else None,"my_cartela_number":p["n"] if p else None,"winner":g["winner"]}
+  if g["status"]=="waiting" and g["lobby_started_at"] is not None:
+   g["seconds"]=max(0,math.ceil(30-(time.time()-g["lobby_started_at"])))
+  p=g["players"].get(int(u["id"]))
+  return {"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"players":[{"telegram_id":i,"name":x["name"],"cartela_number":x["n"]} for i,x in g["players"].items()],"player_count":len(g["players"]),"my_cartela":p["card"] if p else None,"my_cartela_number":p["n"] if p else None,"winner":g["winner"]}
 class Join(BaseModel):
  cartela_number:int=Field(ge=1,le=200);stake:Decimal=Field(default=Decimal("0"),ge=0,le=Decimal("1000"))
 @app.post("/api/game/join")
 async def join(b:Join,req:Request):
  u=await who(req);i=int(u["id"])
  async with lock:
-  if g["status"]!="waiting":raise HTTPException(409,"Lobby closed; wait for next game.")
-  if i in g["players"]:return {"ok":True}
-  if any(p["n"]==b.cartela_number for p in g["players"].values()):raise HTTPException(409,"Cartela already taken.")
-  if b.stake:
+  if g["status"]!="waiting": raise HTTPException(409,"Lobby closed; wait for the next game.")
+  if g["lobby_started_at"] is not None and time.time()-g["lobby_started_at"]>=30: raise HTTPException(409,"The 30-second lobby has closed. Please join the next game.")
+  if i in g["players"]: return {"ok":True,"cartela":g["players"][i]["card"],"cartela_number":g["players"][i]["n"]}
+  card=newcard()
+  try:
    async with engine.begin() as c:
-    bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i FOR UPDATE"),{"i":i})).scalar_one()
-    if Decimal(str(bal))<b.stake:raise HTTPException(402,"Insufficient balance.")
-    await c.execute(text("UPDATE bingo_wallets SET balance=balance-:a WHERE telegram_id=:i"),{"a":b.stake,"i":i})
-    await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:i,'bet',:a,'verified','Bingo stake')"),{"i":i,"a":-b.stake})
-  card=newcard();g["players"][i]={"name":u.get("first_name","Player"),"n":b.cartela_number,"card":card,"stake":float(b.stake)}
-  async with engine.begin() as c:await c.execute(text("INSERT INTO bingo_game_players(game_id,telegram_id,cartela_number,cartela,stake) VALUES(:g,:i,:n,CAST(:c AS jsonb),:s)"),{"g":g["id"],"i":i,"n":b.cartela_number,"c":json.dumps(card),"s":b.stake})
-  return {"ok":True,"cartela":card,"cartela_number":b.cartela_number}
+    game_row=(await c.execute(text("SELECT status,lobby_started_at FROM bingo_games WHERE id=:g FOR UPDATE"),{"g":g["id"]})).first()
+    if not game_row or game_row[0]!="waiting": raise HTTPException(409,"Lobby closed; wait for the next game.")
+    taken=(await c.execute(text("SELECT 1 FROM bingo_game_players WHERE game_id=:g AND cartela_number=:n"),{"g":g["id"],"n":b.cartela_number})).first()
+    if taken: raise HTTPException(409,"Cartela already taken. Please choose an available number.")
+    if b.stake:
+     bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i FOR UPDATE"),{"i":i})).scalar_one_or_none()
+     if bal is None or Decimal(str(bal))<b.stake: raise HTTPException(402,"Insufficient balance.")
+     await c.execute(text("UPDATE bingo_wallets SET balance=balance-:a,updated_at=NOW() WHERE telegram_id=:i"),{"a":b.stake,"i":i})
+     await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:i,'bet',:a,'verified','Bingo stake')"),{"i":i,"a":-b.stake})
+    await c.execute(text("INSERT INTO bingo_game_players(game_id,telegram_id,cartela_number,cartela,stake) VALUES(:g,:i,:n,CAST(:c AS jsonb),:s)"),{"g":g["id"],"i":i,"n":b.cartela_number,"c":json.dumps(card),"s":b.stake})
+    await c.execute(text("UPDATE bingo_games SET lobby_started_at=COALESCE(lobby_started_at,NOW()) WHERE id=:g"),{"g":g["id"]})
+  except IntegrityError:
+   raise HTTPException(409,"That cartela was just taken. Choose another available number.")
+  g["players"][i]={"name":u.get("first_name","Player"),"n":b.cartela_number,"card":card,"stake":float(b.stake)}
+  if g["lobby_started_at"] is None:g["lobby_started_at"]=time.time()
+  g["seconds"]=max(0,math.ceil(30-(time.time()-g["lobby_started_at"])))
+  return {"ok":True,"cartela":card,"cartela_number":b.cartela_number,"lobby_seconds":g["seconds"]}
 @app.post("/api/game/claim")
 async def claim(req:Request):
  u=await who(req);i=int(u["id"])
@@ -220,7 +235,7 @@ async def claim(req:Request):
   line=winline(p["card"],g["called"])
   if not line:raise HTTPException(400,"No valid line yet.")
   if g["winner"]:raise HTTPException(409,"Another player already won.")
-  g["winner"]={"telegram_id":i,"name":p["name"],"cartela_number":p["n"],"pattern":line};g["status"]="finished";prize=sum(Decimal(str(x["stake"])) for x in g["players"].values())
+  g["winner"]={"telegram_id":i,"name":p["name"],"cartela_number":p["n"],"pattern":line};g["status"]="finished";g["finished_at_ts"]=time.time();prize=sum(Decimal(str(x["stake"])) for x in g["players"].values())
   async with engine.begin() as c:
    await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),winner_telegram_id=:u,called_numbers=CAST(:n AS jsonb) WHERE id=:g"),{"u":i,"n":json.dumps(g["called"]),"g":g["id"]})
    if prize:
@@ -266,6 +281,8 @@ async def ws(ws:WebSocket):
  await ws.accept()
  try:
   while True:
-   async with lock:d={"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"player_count":len(g["players"]),"winner":g["winner"]}
+   async with lock:
+    if g["status"]=="waiting" and g["lobby_started_at"] is not None:g["seconds"]=max(0,math.ceil(30-(time.time()-g["lobby_started_at"])))
+    d={"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"player_count":len(g["players"]),"winner":g["winner"]}
    await ws.send_json(d);await asyncio.sleep(1)
  except (WebSocketDisconnect,RuntimeError):pass
