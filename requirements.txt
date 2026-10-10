@@ -1,7 +1,1 @@
-
-fastapi
-uvicorn[standard]
-python-telegram-bot
-sqlalchemy[asyncio]
-asyncpg
-python-dotenv
+fastapi\nuvicorn[standard]\npython-telegram-bot>=21,<23\nsqlalchemy[asyncio]>=2.0\nasyncpg\npython-dotenv\n
