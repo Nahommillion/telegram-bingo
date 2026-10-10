@@ -1,4 +1,4 @@
-import os,json,asyncio,random,hmac,hashlib,urllib.parse,time,secrets,logging,math
+import os,json,asyncio,random,hmac,hashlib,urllib.parse,time,secrets,logging,math,re
 from contextlib import asynccontextmanager
 from pathlib import Path
 from decimal import Decimal
@@ -30,12 +30,15 @@ async def dbinit():
  if not DB: raise RuntimeError("Set DATABASE_URL in Render.")
  engine=create_async_engine(dsn(DB),pool_pre_ping=True)
  qs=[
- "CREATE TABLE IF NOT EXISTS bingo_users(telegram_id BIGINT PRIMARY KEY,username TEXT,display_name TEXT,language VARCHAR(5) DEFAULT 'en',created_at TIMESTAMPTZ DEFAULT NOW())",
+ "CREATE TABLE IF NOT EXISTS bingo_users(telegram_id BIGINT PRIMARY KEY,username TEXT,display_name TEXT,language VARCHAR(5) DEFAULT 'en',phone_number TEXT,phone_verified BOOLEAN DEFAULT FALSE,created_at TIMESTAMPTZ DEFAULT NOW())",
+  "ALTER TABLE bingo_users ADD COLUMN IF NOT EXISTS phone_number TEXT",
+  "ALTER TABLE bingo_users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE",
  "CREATE TABLE IF NOT EXISTS bingo_wallets(telegram_id BIGINT PRIMARY KEY REFERENCES bingo_users(telegram_id),balance NUMERIC(14,2) DEFAULT 0,updated_at TIMESTAMPTZ DEFAULT NOW())",
  "CREATE TABLE IF NOT EXISTS bingo_transactions(id BIGSERIAL PRIMARY KEY,telegram_id BIGINT,transaction_type TEXT,amount NUMERIC(14,2),status TEXT DEFAULT 'pending',description TEXT,external_reference TEXT UNIQUE,created_at TIMESTAMPTZ DEFAULT NOW())",
  "CREATE TABLE IF NOT EXISTS bingo_referrals(id BIGSERIAL PRIMARY KEY,referrer_telegram_id BIGINT,referred_telegram_id BIGINT UNIQUE,created_at TIMESTAMPTZ DEFAULT NOW())",
  "ALTER TABLE bingo_referrals ADD COLUMN IF NOT EXISTS referrer_telegram_id BIGINT",
  "CREATE TABLE IF NOT EXISTS deposit_requests(id BIGSERIAL PRIMARY KEY,telegram_id BIGINT,provider TEXT,amount NUMERIC(14,2),reference TEXT,status TEXT DEFAULT 'pending',created_at TIMESTAMPTZ DEFAULT NOW(),verified_at TIMESTAMPTZ)",
+  "CREATE TABLE IF NOT EXISTS withdrawal_requests(id BIGSERIAL PRIMARY KEY,telegram_id BIGINT NOT NULL,provider TEXT NOT NULL,amount NUMERIC(14,2) NOT NULL,destination TEXT NOT NULL,status TEXT DEFAULT 'pending',created_at TIMESTAMPTZ DEFAULT NOW(),processed_at TIMESTAMPTZ)",
  "CREATE TABLE IF NOT EXISTS payment_records(id BIGSERIAL PRIMARY KEY,provider TEXT,external_reference TEXT UNIQUE,amount NUMERIC(14,2),payer_reference TEXT,memo TEXT,matched_request_id BIGINT,created_at TIMESTAMPTZ DEFAULT NOW())",
  "CREATE TABLE IF NOT EXISTS bingo_games(id BIGSERIAL PRIMARY KEY,status TEXT,created_at TIMESTAMPTZ DEFAULT NOW(),started_at TIMESTAMPTZ,finished_at TIMESTAMPTZ,winner_telegram_id BIGINT,called_numbers JSONB DEFAULT '[]'::jsonb)",
  "CREATE TABLE IF NOT EXISTS bingo_game_players(game_id BIGINT,telegram_id BIGINT,cartela_number INT,cartela JSONB,stake NUMERIC(14,2) DEFAULT 0,PRIMARY KEY(game_id,telegram_id),UNIQUE(game_id,cartela_number))",
@@ -79,6 +82,27 @@ async def sendwel(up,l=None):
   try: await up.effective_message.reply_photo(str(p),caption=wel(l),reply_markup=kb(l));return
   except Exception: logger.exception("Welcome image failed; sending text fallback")
  await up.effective_message.reply_text(wel(l),reply_markup=kb(l))
+async def request_contact(up):
+ await up.effective_message.reply_text(
+  "📱 Welcome! Please share your own phone number to register and use Cartela Bingo. Tap the button below.",
+  reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📱 Share my phone number",request_contact=True)]],resize_keyboard=True,one_time_keyboard=True)
+ )
+async def contact(up,ctx):
+ u=up.effective_user;m=up.effective_message;ct=m.contact
+ await reg(u.id,u.username,u.first_name,"am" if (u.language_code or "").startswith("am") else "en")
+ if not ct or ct.user_id != u.id:
+  await m.reply_text("For security, please share your own contact using the button below.")
+  await request_contact(up);return
+ phone=re.sub(r"[^0-9+]", "", ct.phone_number or "")
+ if len(re.sub(r"\D","",phone))<9:
+  await m.reply_text("That phone number does not look valid. Please share your contact again.");await request_contact(up);return
+ async with engine.begin() as c:
+  other=(await c.execute(text("SELECT telegram_id FROM bingo_users WHERE RIGHT(COALESCE(phone_number,''),9)=RIGHT(:p,9) AND telegram_id<>:i LIMIT 1"),{"p":phone,"i":u.id})).scalar_one_or_none()
+  if other:
+   await m.reply_text("That phone number is already registered to another Telegram account. Please contact support if this is a mistake.",reply_markup=kb(await langof(u.id)));return
+  await c.execute(text("UPDATE bingo_users SET phone_number=:p,phone_verified=TRUE WHERE telegram_id=:i"),{"p":phone,"i":u.id})
+ await m.reply_text("✅ Phone number registered successfully.",reply_markup=kb(await langof(u.id)))
+ await sendwel(up)
 async def start(up,ctx):
  logger.info("Received /start update")
  u=up.effective_user; await reg(u.id,u.username,u.first_name,"am" if (u.language_code or "").startswith("am") else "en")
@@ -88,10 +112,18 @@ async def start(up,ctx):
    if r!=u.id:
     async with engine.begin() as c:await c.execute(text("INSERT INTO bingo_referrals(referrer_telegram_id,referred_telegram_id) VALUES(:r,:u) ON CONFLICT(referred_telegram_id) DO NOTHING"),{"r":r,"u":u.id})
   except ValueError:pass
+ async with engine.connect() as c:
+  phone=(await c.execute(text("SELECT phone_number FROM bingo_users WHERE telegram_id=:i"),{"i":u.id})).scalar_one_or_none()
+ if not phone:
+  await request_contact(up);return
  await sendwel(up)
 async def bottext(up,ctx):
  logger.info("Received non-command text update")
  u=up.effective_user;m=up.effective_message;s=(m.text or "").strip();await reg(u.id,u.username,u.first_name);l=await langof(u.id)
+ async with engine.connect() as c:
+  phone=(await c.execute(text("SELECT phone_number FROM bingo_users WHERE telegram_id=:i"),{"i":u.id})).scalar_one_or_none()
+ if not phone:
+  await request_contact(up);return
  if ctx.user_data.get("rename"):
   async with engine.begin() as c:await c.execute(text("UPDATE bingo_users SET display_name=:n WHERE telegram_id=:i"),{"n":s[:100],"i":u.id})
   ctx.user_data["rename"]=False;await m.reply_text("✅ Name updated.",reply_markup=kb(l));return
@@ -122,7 +154,11 @@ def auth(init):
   return json.loads(d["user"])
  except Exception:raise HTTPException(401,"Telegram authentication failed. Reopen the app.")
 async def who(req):
- u=auth(req.headers.get("X-Telegram-Init-Data",""));await reg(int(u["id"]),u.get("username"),u.get("first_name"));return u
+ u=auth(req.headers.get("X-Telegram-Init-Data",""));await reg(int(u["id"]),u.get("username"),u.get("first_name"))
+ async with engine.connect() as c:
+  phone=(await c.execute(text("SELECT phone_number FROM bingo_users WHERE telegram_id=:i"),{"i":int(u["id"])})).scalar_one_or_none()
+ if not phone:raise HTTPException(403,"Please register your phone number with the bot first: send /start and share your own contact.")
+ return u
 def newcard():
  cols=[random.sample(range(a,b+1),5) for a,b in [(1,15),(16,30),(31,45),(46,60),(61,75)]];g=[[cols[c][r] for c in range(5)] for r in range(5)];g[2][2]=0;return g
 def winline(card,called):
@@ -159,7 +195,7 @@ async def lifespan(app):
  global bot,ticker
  await dbinit();ticker=asyncio.create_task(loop())
  if BOT:
-  bot=Application.builder().token(BOT).build();bot.add_handler(CommandHandler("start",start));bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,bottext));bot.add_error_handler(telegram_error_handler);await bot.initialize();await bot.bot.delete_webhook(drop_pending_updates=False);await bot.start()
+  bot=Application.builder().token(BOT).build();bot.add_handler(CommandHandler("start",start));bot.add_handler(MessageHandler(filters.CONTACT,contact));bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,bottext));bot.add_error_handler(telegram_error_handler);await bot.initialize();await bot.bot.delete_webhook(drop_pending_updates=False);await bot.start()
   if bot.updater: await bot.updater.start_polling(drop_pending_updates=False)
   logger.info("Telegram polling started successfully")
  else: logger.error("TELEGRAM_BOT_TOKEN is missing")
@@ -185,9 +221,9 @@ async def healthdb():
 async def me(req:Request):
  u=await who(req);i=int(u["id"])
  async with engine.connect() as c:
-  row=(await c.execute(text("SELECT display_name,language FROM bingo_users WHERE telegram_id=:i"),{"i":i})).first();bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i"),{"i":i})).scalar_one_or_none() or 0;refs=(await c.execute(text("SELECT COUNT(*) FROM bingo_referrals WHERE referrer_telegram_id=:i"),{"i":i})).scalar_one()
+  row=(await c.execute(text("SELECT display_name,language,phone_number FROM bingo_users WHERE telegram_id=:i"),{"i":i})).first();bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i"),{"i":i})).scalar_one_or_none() or 0;refs=(await c.execute(text("SELECT COUNT(*) FROM bingo_referrals WHERE referrer_telegram_id=:i"),{"i":i})).scalar_one()
  uname=(await bot.bot.get_me()).username if bot else "YOUR_BOT_USERNAME"
- return {"id":i,"name":(row[0] if row else None) or u.get("first_name","Player"),"username":u.get("username"),"language":row[1] if row else "en","balance":float(bal),"referrals":refs,"referral_link":f"https://t.me/{uname}?start=ref_{i}"}
+ return {"id":i,"name":(row[0] if row else None) or u.get("first_name","Player"),"username":u.get("username"),"language":row[1] if row else "en","phone_number":row[2] if row else None,"balance":float(bal),"referrals":refs,"referral_link":f"https://t.me/{uname}?start=ref_{i}"}
 @app.post("/api/language")
 async def language(req:Request):
  u=await who(req);l=(await req.json()).get("language")
@@ -219,7 +255,9 @@ async def join(b:Join,req:Request):
     if taken: raise HTTPException(409,"Cartela already taken. Please choose an available number.")
     if b.stake:
      bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i FOR UPDATE"),{"i":i})).scalar_one_or_none()
-     if bal is None or Decimal(str(bal))<b.stake: raise HTTPException(402,"Insufficient balance.")
+     pending=(await c.execute(text("SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE telegram_id=:i AND status='pending'"),{"i":i})).scalar_one() or 0
+     available=Decimal(str(bal or 0))-Decimal(str(pending))
+     if available<b.stake: raise HTTPException(402,"Insufficient available balance after pending withdrawals.")
      await c.execute(text("UPDATE bingo_wallets SET balance=balance-:a,updated_at=NOW() WHERE telegram_id=:i"),{"a":b.stake,"i":i})
      await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:i,'bet',:a,'verified','Bingo stake')"),{"i":i,"a":-b.stake})
     await c.execute(text("INSERT INTO bingo_game_players(game_id,telegram_id,cartela_number,cartela,stake) VALUES(:g,:i,:n,CAST(:c AS jsonb),:s)"),{"g":g["id"],"i":i,"n":b.cartela_number,"c":json.dumps(card),"s":b.stake})
@@ -233,12 +271,21 @@ async def join(b:Join,req:Request):
 @app.post("/api/game/claim")
 async def claim(req:Request):
  u=await who(req);i=int(u["id"])
+ try:
+  body=await req.json()
+  marked={int(x) for x in body.get("marked",[]) if str(x).isdigit()}
+ except Exception:marked=set()
  async with lock:
   if g["status"]!="running":raise HTTPException(409,"Game is not running.")
   p=g["players"].get(i)
   if not p:raise HTTPException(400,"Join first.")
   line=winline(p["card"],g["called"])
   if not line:raise HTTPException(400,"No valid line yet.")
+  valid_marked=(marked & set(g["called"])) | {0}
+  lines=[[(r,c) for c in range(5)] for r in range(5)]+[[(r,c) for r in range(5)] for c in range(5)]+[[(i,i) for i in range(5)],[(i,4-i) for i in range(5)]]
+  marked_line=next(([[r,c] for r,c in ln] for ln in lines if all(p["card"][r][c] in valid_marked for r,c in ln)),None)
+  if not marked_line:raise HTTPException(400,"Mark every called number in a complete horizontal, vertical, or diagonal line first.")
+  line=marked_line
   if g["winner"]:raise HTTPException(409,"Another player already won.")
   g["winner"]={"telegram_id":i,"name":p["name"],"cartela_number":p["n"],"pattern":line};g["status"]="finished";g["finished_at_ts"]=time.time();prize=sum(Decimal(str(x["stake"])) for x in g["players"].values())
   async with engine.begin() as c:
@@ -253,8 +300,10 @@ async def wallet(req:Request):
  async with engine.connect() as c:
   bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i"),{"i":i})).scalar_one_or_none() or 0
   ds=(await c.execute(text("SELECT id,provider,amount,reference,status,created_at FROM deposit_requests WHERE telegram_id=:i ORDER BY id DESC LIMIT 20"),{"i":i})).fetchall()
+  ws=(await c.execute(text("SELECT id,provider,amount,destination,status,created_at FROM withdrawal_requests WHERE telegram_id=:i ORDER BY id DESC LIMIT 20"),{"i":i})).fetchall()
+  pending=(await c.execute(text("SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE telegram_id=:i AND status='pending'"),{"i":i})).scalar_one()
   ts=(await c.execute(text("SELECT transaction_type,amount,status,description,created_at FROM bingo_transactions WHERE telegram_id=:i ORDER BY id DESC LIMIT 20"),{"i":i})).fetchall()
- return {"balance":float(bal),"deposits":[{"id":x[0],"provider":x[1],"amount":float(x[2]),"reference":x[3],"status":x[4],"created_at":x[5].isoformat()} for x in ds],"transactions":[{"type":x[0],"amount":float(x[1]),"status":x[2],"description":x[3],"created_at":x[4].isoformat()} for x in ts]}
+ return {"balance":float(bal),"available_balance":float(Decimal(str(bal))-Decimal(str(pending or 0))),"deposits":[{"id":x[0],"provider":x[1],"amount":float(x[2]),"reference":x[3],"status":x[4],"created_at":x[5].isoformat()} for x in ds],"withdrawals":[{"id":x[0],"provider":x[1],"amount":float(x[2]),"destination":x[3],"status":x[4],"created_at":x[5].isoformat()} for x in ws],"transactions":[{"type":x[0],"amount":float(x[1]),"status":x[2],"description":x[3],"created_at":x[4].isoformat()} for x in ts]}
 class Dep(BaseModel):
  provider:str;amount:Decimal=Field(gt=0,le=Decimal("1000000"));reference:str=Field(min_length=3,max_length=200)
 @app.post("/api/deposits")
@@ -263,6 +312,53 @@ async def deposit(b:Dep,req:Request):
  if p not in PROVIDERS:raise HTTPException(400,"Unknown provider.")
  async with engine.begin() as c:r=await c.execute(text("INSERT INTO deposit_requests(telegram_id,provider,amount,reference) VALUES(:i,:p,:a,:r) RETURNING id"),{"i":int(u["id"]),"p":p,"a":b.amount,"r":b.reference})
  return {"ok":True,"id":r.scalar_one(),"status":"pending"}
+class Withdrawal(BaseModel):
+ provider:str
+ amount:Decimal=Field(gt=0,le=Decimal("1000000"))
+ destination:str=Field(min_length=5,max_length=100)
+@app.post("/api/withdrawals")
+async def withdrawal(b:Withdrawal,req:Request):
+ u=await who(req);i=int(u["id"]);p=b.provider.lower()
+ if p not in ("telebirr","cbe_bank","ebirr"):raise HTTPException(400,"Choose Telebirr, CBE Bank, or eBirr.")
+ dest=re.sub(r"[^A-Za-z0-9+@._ -]","",b.destination).strip()
+ if p=="cbe_bank":
+  if len(re.sub(r"\D","",dest))<8:raise HTTPException(400,"Enter a valid CBE account number.")
+ else:
+  if len(re.sub(r"\D","",dest))<9:raise HTTPException(400,"Enter a valid phone number.")
+ async with engine.begin() as c:
+  bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i FOR UPDATE"),{"i":i})).scalar_one_or_none() or 0
+  pending=(await c.execute(text("SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE telegram_id=:i AND status='pending'"),{"i":i})).scalar_one() or 0
+  if Decimal(str(bal))-Decimal(str(pending))<b.amount:raise HTTPException(402,"Insufficient available balance.")
+  rid=(await c.execute(text("INSERT INTO withdrawal_requests(telegram_id,provider,amount,destination) VALUES(:i,:p,:a,:d) RETURNING id"),{"i":i,"p":p,"a":b.amount,"d":dest})).scalar_one()
+  await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:i,'withdrawal',:a,'pending',:d)"),{"i":i,"a":-b.amount,"d":f"Withdrawal request #{rid} via {p}"})
+ return {"ok":True,"id":rid,"status":"pending","message":"Withdrawal request submitted. Funds are reserved while it is pending."}
+class Transfer(BaseModel):
+ method:str
+ recipient:str=Field(min_length=2,max_length=120)
+ amount:Decimal=Field(gt=0,le=Decimal("1000000"))
+@app.post("/api/transfers")
+async def transfer(b:Transfer,req:Request):
+ u=await who(req);sender=int(u["id"]);method=b.method.lower();target=b.recipient.strip()
+ if method not in ("phone","username"):raise HTTPException(400,"Choose phone or username.")
+ async with engine.begin() as c:
+  if method=="phone":
+   phone=re.sub(r"\D","",target)
+   recipient=(await c.execute(text("SELECT telegram_id,COALESCE(display_name,username,'Player'),username FROM bingo_users WHERE RIGHT(COALESCE(phone_number,''),9)=RIGHT(:p,9) AND phone_verified=TRUE LIMIT 1"),{"p":phone})).first()
+  else:
+   username=target.lstrip("@").lower()
+   recipient=(await c.execute(text("SELECT telegram_id,COALESCE(display_name,username,'Player'),username FROM bingo_users WHERE LOWER(username)=:u LIMIT 1"),{"u":username})).first()
+  if not recipient:raise HTTPException(404,"No registered player was found with those details.")
+  rid=int(recipient[0])
+  if rid==sender:raise HTTPException(400,"You cannot transfer to yourself.")
+  ids=sorted([sender,rid])
+  balances=(await c.execute(text("SELECT telegram_id,balance FROM bingo_wallets WHERE telegram_id IN (:a,:b) ORDER BY telegram_id FOR UPDATE"),{"a":ids[0],"b":ids[1]})).fetchall()
+  bm={int(x[0]):Decimal(str(x[1] or 0)) for x in balances}
+  pending=(await c.execute(text("SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE telegram_id=:i AND status='pending'"),{"i":sender})).scalar_one() or 0
+  if bm.get(sender,Decimal("0"))-Decimal(str(pending))<b.amount:raise HTTPException(402,"Insufficient available balance.")
+  await c.execute(text("UPDATE bingo_wallets SET balance=balance-:a,updated_at=NOW() WHERE telegram_id=:i"),{"a":b.amount,"i":sender})
+  await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:i"),{"a":b.amount,"i":rid})
+  await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:i,'transfer_sent',:a,'verified',:d),(:r,'transfer_received',:a,'verified',:rd)"),{"i":sender,"r":rid,"a":b.amount,"d":f"Transfer to {recipient[1]}","rd":f"Transfer from Telegram user {sender}"})
+ return {"ok":True,"recipient":{"name":recipient[1],"username":recipient[2]},"amount":float(b.amount)}
 class Payment(BaseModel):
  provider:str;external_reference:str=Field(min_length=2,max_length=200);amount:Decimal=Field(gt=0);payer_reference:Optional[str]=None;memo:Optional[str]=None
 @app.post("/api/payments/records")
