@@ -61,7 +61,7 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
 .bhead{display:grid;grid-template-columns:repeat(5,1fr);background:linear-gradient(90deg,#08c879,#ffd447,#ed3346);color:#071525;font-weight:1000;border-radius:7px 7px 0 0;padding:6px 0}
 .card{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;background:#e9f0f4;padding:4px;border-radius:0 0 8px 8px}
 .cell{aspect-ratio:1;display:grid;place-items:center;background:white;color:#142333;border-radius:4px;font-size:clamp(11px,3vw,16px);font-weight:800;border:1px solid #d0d9df}
-.cell.marked{background:#20d78a;color:#052b1b}
+.cell.marked{background:#20d78a;color:#052b1b}.mini-card-wrap{max-width:330px;margin:0 auto}.cell{cursor:pointer;user-select:none}.cell.uncalled{opacity:.62}.provider-list{display:grid;gap:9px;margin:12px 0}.provider-row{display:flex;align-items:center;gap:10px;background:#0b2032;border:1px solid #294d61;border-radius:13px;padding:10px}.provider-logo{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border-radius:12px;background:linear-gradient(135deg,#078844,#ffd447);color:#061525;font-weight:1000;font-size:13px}.provider-row .details{flex:1;min-width:0}.copy-small{border:1px solid #426779;border-radius:9px;background:#17384d;color:white;padding:8px}.wallet-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:12px 0}.wallet-tab{padding:11px 5px;border-radius:11px;border:1px solid #2a5266;background:#17384d;color:white;font-weight:800}.wallet-tab.active{background:#12a968;color:#06291b;border-color:#65f0b0}.wallet-pane{display:none}.wallet-pane.active{display:block}
 .cell.win{background:#ffd447!important;color:#201800;box-shadow:0 0 0 2px white,0 0 14px #ffd447}
 .number{width:80px;height:80px;margin:14px auto;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 30% 25%,white,#ffd447 32%,#d59a06);border:5px solid white;box-shadow:0 0 0 4px #13c879,0 0 25px #ffd44788;color:#0a1c2a;font-size:30px;font-weight:1000;animation:float 2s infinite}
 .chips{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0}
@@ -141,20 +141,49 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
 </section>
 
 <section class="screen" id="wallet">
-<div class="title"><h3 id="walletTitle">💳 Wallet & Deposits</h3></div>
-<div class="panel"><div class="muted small" id="currentBalLabel">CURRENT BALANCE</div><h2 id="walletBal">0.00 Birr</h2><div class="notice" id="autoNote">Automatic verification requires an authorized provider or account integration to send transaction records to this server.</div></div>
-<div class="panel" style="margin-top:12px">
-<h3 id="depositReq">➕ Create Deposit Request</h3>
-<label class="small muted">Payment provider</label>
-<select class="field" id="provider"><option value="telebirr">Telebirr</option><option value="cbe_birr">CBE Birr</option><option value="ebirr">eBirr</option><option value="cbe_bank">CBE Bank Transfer</option></select>
-<label class="small muted">Amount (Birr)</label><input class="field" id="amount" type="number" min="1" placeholder="100">
-<label class="small muted">Transaction/reference code</label><input class="field" id="reference" placeholder="Required for matching">
-<button class="primary" onclick="deposit()" id="submitDeposit">Submit Deposit Request</button>
-<p class="muted small" id="depositHelp">Balance is credited only when a trusted transaction record matches the provider, amount and reference.</p>
-</div>
-<div class="title"><h3>Deposit Requests</h3></div><div class="panel" id="deposits"></div>
-<div class="title"><h3 id="txTitle">📜 Transaction History</h3></div><div class="panel" id="transactions"></div>
-</section>
+ <div class="title"><h3 id="walletTitle">💳 Wallet</h3></div>
+ <div class="panel"><div class="muted small" id="currentBalLabel">AVAILABLE BALANCE</div><h2 id="walletBal">0.00 Birr</h2><div class="notice" id="autoNote">Deposits and withdrawals remain pending until verified by the operator/payment process. Never send money to a recipient you have not checked.</div></div>
+ <div class="wallet-actions">
+  <button class="wallet-tab active" data-wallet-tab="deposit" onclick="walletTab('deposit')">➕ Deposit</button>
+  <button class="wallet-tab" data-wallet-tab="withdraw" onclick="walletTab('withdraw')">⬆️ Withdraw</button>
+  <button class="wallet-tab" data-wallet-tab="transfer" onclick="walletTab('transfer')">↔️ Transfer</button>
+ </div>
+ <div class="panel wallet-pane active" id="depositPane">
+  <h3 id="depositReq">➕ Deposit</h3>
+  <label class="small muted">Choose payment method</label>
+  <select class="field" id="provider" onchange="showDepositDetails()">
+   <option value="telebirr">📱 Telebirr</option><option value="cbe_bank">🏦 CBE Bank</option><option value="ebirr">💚 eBirr</option>
+  </select>
+  <div id="depositDetails" class="provider-list"></div>
+  <label class="small muted">Amount (Birr)</label><input class="field" id="amount" type="number" min="1" placeholder="100">
+  <label class="small muted">Payment transaction/reference code</label><input class="field" id="reference" placeholder="Enter the reference after paying">
+  <button class="primary" onclick="deposit()" id="submitDeposit">Submit Deposit Request</button>
+  <p class="muted small" id="depositHelp">Submitting a request does not automatically add funds. The payment must be verified.</p>
+ </div>
+ <div class="panel wallet-pane" id="withdrawPane">
+  <h3>⬆️ Withdraw money</h3>
+  <label class="small muted">Amount to withdraw (Birr)</label><input class="field" id="withdrawAmount" type="number" min="1" placeholder="100">
+  <label class="small muted">Choose withdrawal method</label>
+  <select class="field" id="withdrawProvider" onchange="updateWithdrawDestination()"><option value="telebirr">📱 Telebirr</option><option value="cbe_bank">🏦 CBE Bank</option><option value="ebirr">💚 eBirr</option></select>
+  <label class="small muted" id="withdrawDestinationLabel">Phone number</label>
+  <input class="field" id="withdrawDestination" placeholder="Enter phone number">
+  <button class="primary" onclick="withdraw()">Submit withdrawal request</button>
+  <p class="muted small">Requests stay pending while the operator processes them. The amount is reserved from your available balance.</p>
+ </div>
+ <div class="panel wallet-pane" id="transferPane">
+  <h3>↔️ Transfer to a player</h3>
+  <label class="small muted">Find player using</label>
+  <select class="field" id="transferMethod"><option value="phone">📱 Registered phone number</option><option value="username">Telegram username</option></select>
+  <label class="small muted" id="transferRecipientLabel">Player phone number</label>
+  <input class="field" id="transferRecipient" placeholder="Enter registered phone number">
+  <label class="small muted">Amount to transfer (Birr)</label><input class="field" id="transferAmount" type="number" min="1" placeholder="50">
+  <button class="primary" onclick="transfer()">Review and transfer</button>
+  <p class="muted small">Check the recipient and amount carefully. Transfers to other registered players are immediate and cannot be automatically reversed.</p>
+ </div>
+ <div class="title"><h3>Deposit Requests</h3></div><div class="panel" id="deposits"></div>
+ <div class="title"><h3>Withdrawal Requests</h3></div><div class="panel" id="withdrawals"></div>
+ <div class="title"><h3 id="txTitle">📜 Transaction History</h3></div><div class="panel" id="transactions"></div>
+ </section>
 
 <section class="screen" id="leaderboard">
 <div class="title"><h3 id="leaderTitle">🏆 Leaderboard</h3></div>
@@ -217,6 +246,7 @@ let winCells = [];
 let busy = false;
 let interval = null;
 let selectedCartela = null;
+const manualMarks = new Set([0]);
 
 const strings = {
   en: {
@@ -417,6 +447,7 @@ async function boot(){
     document.getElementById('refCount').textContent=me.referrals;
     await refreshGame();
     await refreshWallet();
+    showDepositDetails();updateWithdrawDestination();
     await refreshLeaders();
     applyLang();
     if(interval)clearInterval(interval);
@@ -539,6 +570,7 @@ async function joinGame(n){
       })
     });
     winCells=[];
+    manualMarks.clear();manualMarks.add(0);
     msg('Cartela #'+n+' reserved. You are in the game!');
     telegramApp()?.HapticFeedback?.notificationOccurred('success');
     await refreshGame();
@@ -558,14 +590,22 @@ function callLabel(n){
 
 function renderCard(card,called,wins=[]){
   const set=new Set(wins.map(x=>x.join(',')));
-  document.getElementById('myCard').innerHTML=card.flatMap((row,r)=>row.map((n,c)=>
-    `<span class="cell ${n===0||called.includes(n)?'marked':''} ${set.has([r,c].join(','))?'win':''}">${n===0?'★':n}</span>`
-  )).join('');
+  document.getElementById('myCard').innerHTML=card.flatMap((row,r)=>row.map((n,c)=>{
+    const marked=n===0||manualMarks.has(n);
+    const wasCalled=n===0||called.includes(n);
+    return `<button type="button" class="cell ${marked?'marked':''} ${!wasCalled?'uncalled':''} ${set.has([r,c].join(','))?'win':''}" ${n===0||!called.includes(n)?'disabled':''} onclick="toggleMark(${n})" aria-label="Mark ${n}">${n===0?'★':n}</button>`;
+  })).join('');
+}
+function toggleMark(n){
+  n=Number(n);
+  if(!G||!G.called.includes(n)||n===0)return;
+  if(manualMarks.has(n))manualMarks.delete(n);else manualMarks.add(n);
+  renderCard(G.my_cartela,G.called,winCells);
 }
 
 async function claim(){
   try{
-    const r=await api('/api/game/claim',{method:'POST',body:'{}'});
+    const r=await api('/api/game/claim',{method:'POST',body:JSON.stringify({marked:[...manualMarks]})});
     winCells=r.pattern||[];
     document.getElementById('claimMsg').textContent=t('claimok');
     document.getElementById('claimMsg').className='notice';
@@ -585,9 +625,12 @@ async function refreshWallet(){
     const w=await api('/api/wallet');
     if(me)me.balance=w.balance;
     document.getElementById('homeBal').textContent=money(w.balance);
-    document.getElementById('walletBal').textContent=money(w.balance);
+    document.getElementById('walletBal').textContent=money(w.available_balance??w.balance);
     document.getElementById('deposits').innerHTML=w.deposits.map(d=>
       `<div class="row"><span>${esc(d.provider)}<br><small class="muted">${esc(d.reference)} · ${esc(d.status)}</small></span><b>${money(d.amount)}</b></div>`
+    ).join('')||t('empty');
+    document.getElementById('withdrawals').innerHTML=(w.withdrawals||[]).map(x=>
+      `<div class="row"><span>${esc(x.provider)} · ${esc(x.destination)}<br><small class="muted">#${x.id} · ${esc(x.status)}</small></span><b>${money(x.amount)}</b></div>`
     ).join('')||t('empty');
     document.getElementById('transactions').innerHTML=w.transactions.map(x=>
       `<div class="row"><span>${esc(x.type)}<br><small class="muted">${esc(x.description||'')}</small></span><span>${money(x.amount)}<br><small>${esc(x.status)}</small></span></div>`
@@ -601,7 +644,7 @@ async function deposit(){
   try{
     const amount=Number(document.getElementById('amount').value);
     const reference=document.getElementById('reference').value.trim();
-    if(!amount||reference.length<3)throw Error('Enter amount and reference.');
+    if(!amount||reference.length<3)throw Error('Enter the amount and payment reference code.');
     await api('/api/deposits',{
       method:'POST',
       body:JSON.stringify({
@@ -615,6 +658,76 @@ async function deposit(){
   }catch(e){
     msg(e.message,true);
   }
+}
+
+function walletTab(tab){
+  document.querySelectorAll('[data-wallet-tab]').forEach(b=>b.classList.toggle('active',b.dataset.walletTab===tab));
+  document.querySelectorAll('.wallet-pane').forEach(p=>p.classList.toggle('active',p.id===tab+'Pane'));
+}
+const depositRecipients=[
+ {title:'Nahom Million',detail:'0943912235',provider:'Phone recipient'},
+ {title:'Tewdros Getu',detail:'0937189718',provider:'Phone recipient'},
+ {title:'Tinsae Merga',detail:'0934417096',provider:'Phone recipient'},
+ {title:'CBE Bank',detail:'1000261740528',provider:'CBE account'}
+];
+function showDepositDetails(){
+ const p=document.getElementById('provider').value;
+ const host=document.getElementById('depositDetails');
+ if(p==='ebirr'){
+  host.innerHTML='<div class="notice">eBirr recipient details will be added when you provide them. Do not send money until the correct eBirr details are shown.</div>';
+  return;
+ }
+ const rows=p==='cbe_bank'?depositRecipients.filter(x=>x.title==='CBE Bank'):depositRecipients.filter(x=>x.title!=='CBE Bank');
+ host.innerHTML=rows.map((x,i)=>`<div class="provider-row"><div class="provider-logo">${x.title==='CBE Bank'?'CBE':p==='telebirr'?'T':'eB'}</div><div class="details"><b>${esc(x.title)}</b><div class="muted small">${esc(x.detail)}</div><small class="muted">${esc(x.provider)}</small></div><button class="copy-small" onclick="copyValue('${x.detail}')">Copy</button></div>`).join('');
+}
+async function copyValue(value){
+ try{
+  const webApp=telegramApp();
+  if(webApp?.clipboard?.writeText)await webApp.clipboard.writeText(value);
+  else await navigator.clipboard.writeText(value);
+  msg('Copied: '+value);
+ }catch(e){msg('Copy failed. Please copy manually: '+value,true);}
+}
+function updateWithdrawDestination(){
+ const p=document.getElementById('withdrawProvider').value;
+ const bank=p==='cbe_bank';
+ document.getElementById('withdrawDestinationLabel').textContent=bank?'CBE account number':'Phone number';
+ document.getElementById('withdrawDestination').placeholder=bank?'Enter CBE account number':'Enter phone number';
+}
+document.getElementById('transferMethod').addEventListener('change',()=>{
+ const phone=document.getElementById('transferMethod').value==='phone';
+ document.getElementById('transferRecipientLabel').textContent=phone?'Player phone number':'Telegram username';
+ document.getElementById('transferRecipient').placeholder=phone?'Enter registered phone number':'Enter @username';
+});
+async function withdraw(){
+ try{
+  const amount=Number(document.getElementById('withdrawAmount').value);
+  const provider=document.getElementById('withdrawProvider').value;
+  const destination=document.getElementById('withdrawDestination').value.trim();
+  if(!amount||amount<=0||!destination)throw Error('Enter an amount and destination details.');
+  const label=provider==='cbe_bank'?'CBE account':'phone number';
+  if(!confirm(`Submit withdrawal of ${money(amount)} using ${provider}? Check your ${label}.`))return;
+  const d=await api('/api/withdrawals',{method:'POST',body:JSON.stringify({amount,provider,destination})});
+  msg(d.message||'Withdrawal request submitted.');
+  document.getElementById('withdrawAmount').value='';
+  document.getElementById('withdrawDestination').value='';
+  await refreshWallet();
+ }catch(e){msg(e.message,true);}
+}
+async function transfer(){
+ try{
+  const method=document.getElementById('transferMethod').value;
+  const recipient=document.getElementById('transferRecipient').value.trim();
+  const amount=Number(document.getElementById('transferAmount').value);
+  if(!recipient||!amount||amount<=0)throw Error('Enter a recipient and transfer amount.');
+  const label=method==='phone'?'phone number':'Telegram username';
+  if(!confirm(`Transfer ${money(amount)} to the player found by ${label} ${recipient}?`))return;
+  const d=await api('/api/transfers',{method:'POST',body:JSON.stringify({method,recipient,amount})});
+  msg(`Transferred ${money(amount)} to ${d.recipient.name}.`);
+  document.getElementById('transferRecipient').value='';
+  document.getElementById('transferAmount').value='';
+  await refreshWallet();
+ }catch(e){msg(e.message,true);}
 }
 
 async function refreshLeaders(){
