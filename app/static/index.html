@@ -61,7 +61,7 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
 .bhead{display:grid;grid-template-columns:repeat(5,1fr);background:linear-gradient(90deg,#08c879,#ffd447,#ed3346);color:#071525;font-weight:1000;border-radius:7px 7px 0 0;padding:6px 0}
 .card{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;background:#e9f0f4;padding:4px;border-radius:0 0 8px 8px}
 .cell{aspect-ratio:1;display:grid;place-items:center;background:white;color:#142333;border-radius:4px;font-size:clamp(11px,3vw,16px);font-weight:800;border:1px solid #d0d9df}
-.cell.marked{background:#20d78a;color:#052b1b}.mini-card-wrap{max-width:330px;margin:0 auto}.cell{cursor:pointer;user-select:none}.cell.uncalled{opacity:.62}.provider-list{display:grid;gap:9px;margin:12px 0}.provider-row{display:flex;align-items:center;gap:10px;background:#0b2032;border:1px solid #294d61;border-radius:13px;padding:10px}.provider-logo{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border-radius:12px;background:linear-gradient(135deg,#078844,#ffd447);color:#061525;font-weight:1000;font-size:13px}.provider-row .details{flex:1;min-width:0}.copy-small{border:1px solid #426779;border-radius:9px;background:#17384d;color:white;padding:8px}.wallet-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:12px 0}.wallet-tab{padding:11px 5px;border-radius:11px;border:1px solid #2a5266;background:#17384d;color:white;font-weight:800}.wallet-tab.active{background:#12a968;color:#06291b;border-color:#65f0b0}.wallet-pane{display:none}.wallet-pane.active{display:block}
+.cell.marked{background:#20d78a;color:#052b1b}.mini-card-wrap{max-width:270px;margin:0 auto}.my-card-item{max-width:285px;margin:12px auto;padding:9px;background:#102b40;border:1px solid #31576b;border-radius:13px}.my-card-item .bhead{padding:3px 0;font-size:12px}.my-card-item .card{gap:1px;padding:3px}.my-card-item .cell{font-size:clamp(9px,2.4vw,12px);border-radius:3px}.card-caption{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:6px}.provider-brand-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:10px 0}.provider-brand{min-width:0;background:#0b2032;border:1px solid #294d61;border-radius:12px;padding:10px 4px;color:white;font-weight:900;display:flex;flex-direction:column;align-items:center;gap:5px}.provider-brand.active{border-color:#18db8b;box-shadow:0 0 0 1px #18db8b66;background:#123c32}.provider-brand svg{width:31px;height:25px}.provider-brand small{font-size:10px;color:#c8dce8}.cell{cursor:pointer;user-select:none}.cell.uncalled{opacity:.62}.provider-list{display:grid;gap:9px;margin:12px 0}.provider-row{display:flex;align-items:center;gap:10px;background:#0b2032;border:1px solid #294d61;border-radius:13px;padding:10px}.provider-logo{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border-radius:12px;background:linear-gradient(135deg,#078844,#ffd447);color:#061525;font-weight:1000;font-size:13px}.provider-row .details{flex:1;min-width:0}.copy-small{border:1px solid #426779;border-radius:9px;background:#17384d;color:white;padding:8px}.wallet-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:12px 0}.wallet-tab{padding:11px 5px;border-radius:11px;border:1px solid #2a5266;background:#17384d;color:white;font-weight:800}.wallet-tab.active{background:#12a968;color:#06291b;border-color:#65f0b0}.wallet-pane{display:none}.wallet-pane.active{display:block}
 .cell.win{background:#ffd447!important;color:#201800;box-shadow:0 0 0 2px white,0 0 14px #ffd447}
 .number{width:80px;height:80px;margin:14px auto;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 30% 25%,white,#ffd447 32%,#d59a06);border:5px solid white;box-shadow:0 0 0 4px #13c879,0 0 25px #ffd44788;color:#0a1c2a;font-size:30px;font-weight:1000;animation:float 2s infinite}
 .chips{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0}
@@ -112,7 +112,7 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
 <div class="panel center">
 <div class="muted" id="chooseDesc">Choose your cartela and join the next game.</div>
 <div class="number" id="lastNumber">?</div>
-<div class="muted small" id="lastLabel">Last number called</div>
+<div class="muted" id="lastLabel" style="font-weight:900;font-size:17px;margin-top:-7px">Waiting for first number</div>
 <div class="stats"><div class="stat"><span>STARTS IN</span><strong id="timer">00:30</strong></div><div class="stat"><span>PLAYERS</span><strong id="count">0</strong></div><div class="stat"><span>CALLED</span><strong id="calledCount">0/75</strong></div></div>
 </div>
 <div id="selectArea">
@@ -120,8 +120,9 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
 <p class="muted small">Choose an available number. Green = available. Black = already taken. Press Start Game to reserve your selected cartela and join the 30-second countdown.</p>
 <input id="cartelaSearch" class="field" type="number" min="1" max="200" placeholder="Find cartela number (1–200)" oninput="renderChoices()">
 <div class="selection-summary"><span>Selected cartela</span><strong id="selectedCartelaLabel">None</strong></div>
-<label class="small muted" id="stakeLabel">Stake (Birr) — 0 for free demo</label>
-<input id="stake" class="field" type="number" min="0" max="1000" value="0">
+<label class="small muted" id="stakeLabel">Bet per cartela (minimum 30 Birr)</label>
+<input id="stake" class="field" type="number" min="30" max="1000" step="1" value="30" oninput="updateSelectionSummary()">
+<div class="muted small" id="betSummary">Select cartelas to calculate your total bet.</div>
 <button class="primary" id="startGameBtn" onclick="startSelectedGame()" disabled>🎮 Start Game (30s countdown)</button>
 <div class="title"><span class="muted small">Available cartelas</span><span class="muted small" id="availableCount">200 available</span></div>
 <div class="cardgrid" id="choices"></div>
@@ -129,10 +130,8 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
 <div id="playing" class="hidden">
 <div class="title"><h3 id="yourCard">Your Cartela</h3><span class="pill" id="cardNum"></span></div>
 <div class="panel">
-<div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div>
-<div class="card" id="myCard"></div>
+<div id="myCards"></div>
 <div class="chips" id="recent"></div>
-<button class="danger wide" onclick="claim()" id="bingo">🏆 BINGO!</button>
 <div id="claimMsg" class="notice hidden"></div>
 </div>
 </div>
@@ -150,6 +149,11 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
  </div>
  <div class="panel wallet-pane active" id="depositPane">
   <h3 id="depositReq">➕ Deposit</h3>
+  <div class="provider-brand-strip">
+   <button type="button" class="provider-brand active" data-provider-brand="telebirr" onclick="chooseProvider('telebirr')"><svg viewBox="0 0 40 30" aria-hidden="true"><rect x="2" y="2" width="36" height="26" rx="8" fill="#16a05d"/><path d="M11 9h18M20 7v16" stroke="#fff" stroke-width="3" stroke-linecap="round"/><circle cx="20" cy="15" r="4" fill="#ffd447"/></svg><span>telebirr</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="cbe_bank" onclick="chooseProvider('cbe_bank')"><svg viewBox="0 0 40 30" aria-hidden="true"><path d="M20 2 37 10 20 28 3 10Z" fill="#f0b323"/><path d="M20 6 32 11 20 24 8 11Z" fill="#0755a4"/><path d="M13 14h14M20 9v11" stroke="#fff" stroke-width="2"/></svg><span>CBE</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="ebirr" onclick="chooseProvider('ebirr')"><svg viewBox="0 0 40 30" aria-hidden="true"><rect x="2" y="2" width="36" height="26" rx="8" fill="#fff"/><path d="M20 24S7 16 10 9c2-4 7-3 10 1 3-4 8-5 10-1 3 7-10 15-10 15Z" fill="#168a4b"/><path d="M14 15h12" stroke="#ffd447" stroke-width="2"/></svg><span>eBirr</span></button>
+  </div>
   <label class="small muted">Choose payment method</label>
   <select class="field" id="provider" onchange="showDepositDetails()">
    <option value="telebirr">📱 Telebirr</option><option value="cbe_bank">🏦 CBE Bank</option><option value="ebirr">💚 eBirr</option>
@@ -245,8 +249,8 @@ let G = null;
 let winCells = [];
 let busy = false;
 let interval = null;
-let selectedCartela = null;
-const manualMarks = new Set([0]);
+const selectedCartelas = new Set();
+const manualMarksByCard = {};
 
 const strings = {
   en: {
@@ -260,7 +264,7 @@ const strings = {
     openLobby:'Open Game Lobby →',gameTitle:'🎮 Game Lobby',
     chooseDesc:'Choose your cartela and join the next game.',
     lastLabel:'Last number called',chooseCard:'Choose Your Cartela',
-    stakeLabel:'Stake (Birr) — 0 for free demo',yourCard:'Your Cartela',
+    stakeLabel:'Bet per cartela (minimum 30 Birr)',yourCard:'Your Cartela',
     calledTitle:'📣 Called Numbers',bingo:'🏆 BINGO!',
     walletTitle:'💳 Wallet & Deposits',currentBalLabel:'CURRENT BALANCE',
     autoNote:'Automatic verification requires an authorized provider or account integration to send transaction records to this server.',
@@ -295,7 +299,7 @@ const strings = {
     chooseDesc:'ካርቴላዎን ይምረጡና ይቀላቀሉ።',
     lastLabel:'የመጨረሻ የተጠራ ቁጥር',
     chooseCard:'ካርቴላዎን ይምረጡ',
-    stakeLabel:'ውርርድ (ብር) — 0 ለነፃ ሙከራ',
+    stakeLabel:'ለእያንዳንዱ ካርቴላ ውርርድ (ቢያንስ 30 ብር)',
     yourCard:'የእርስዎ ካርቴላ',
     calledTitle:'📣 የተጠሩ ቁጥሮች',bingo:'🏆 ቢንጎ!',
     walletTitle:'💳 ሂሳብና ተቀማጭ',
@@ -463,37 +467,28 @@ function applyLang(){
 
 async function refreshGame(){
   G=await api('/api/game');
-
   document.getElementById('status').textContent=t(G.status);
   document.getElementById('gameStatus').textContent=t(G.status);
   document.getElementById('gameId').textContent='#'+G.id;
-
   document.getElementById('homePlayers').textContent=G.player_count;
   document.getElementById('homeCount').textContent=G.player_count;
   document.getElementById('count').textContent=G.player_count;
-
   document.getElementById('homeTimer').textContent='00:'+String(Math.max(0,G.lobby_seconds)).padStart(2,'0');
   document.getElementById('timer').textContent='00:'+String(Math.max(0,G.lobby_seconds)).padStart(2,'0');
-
   document.getElementById('homeCalled').textContent=G.called.length+'/75';
   document.getElementById('calledCount').textContent=G.called.length+'/75';
-  document.getElementById('lastNumber').textContent=G.called.length?callLabel(G.called[G.called.length-1]):'READY';
-
+  const last=G.called.length?G.called[G.called.length-1]:null;
+  document.getElementById('lastNumber').textContent=last===null?'?':String(last);
+  document.getElementById('lastLabel').textContent=last===null?'Waiting for first number':callLabel(last);
   document.getElementById('allCalled').innerHTML=G.called.slice().reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('')||t('empty');
   document.getElementById('recent').innerHTML=G.called.slice(-8).reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('');
-
-  if(G.my_cartela){
-    selectedCartela=G.my_cartela_number;
+  const mine=G.my_cartelas||((G.my_cartela)?[{cartela:G.my_cartela,cartela_number:G.my_cartela_number,stake:0}]:[]);
+  if(mine.length){
     document.getElementById('selectArea').classList.add('hidden');
     document.getElementById('playing').classList.remove('hidden');
-    document.getElementById('cardNum').textContent='Cartela #'+G.my_cartela_number;
-    document.getElementById('chooseDesc').textContent=
-      G.status==='waiting'
-      ?'Cartela reserved. Game starts in '+G.lobby_seconds+' seconds.'
-      :G.status==='running'
-      ?'LIVE — numbers are being called automatically.'
-      :'Round finished.';
-    renderCard(G.my_cartela,G.called,winCells);
+    document.getElementById('cardNum').textContent=mine.length+' cartela(s)';
+    document.getElementById('chooseDesc').textContent=G.status==='waiting'?'Cartelas reserved. Game starts in '+G.lobby_seconds+' seconds.':G.status==='running'?'LIVE — watch the called number and mark it on each cartela.':'Round finished.';
+    renderCards(mine,G.called,winCells);
   }else if(G.status==='waiting'){
     document.getElementById('selectArea').classList.remove('hidden');
     document.getElementById('playing').classList.add('hidden');
@@ -502,122 +497,83 @@ async function refreshGame(){
     document.getElementById('selectArea').classList.add('hidden');
     document.getElementById('playing').classList.add('hidden');
   }
-
   if(G.winner){
-    document.getElementById('claimMsg').textContent='🏆 BINGO! '+G.winner.name+' won with Cartela #'+G.winner.cartela_number;
-    document.getElementById('claimMsg').className='notice';
-    document.getElementById('claimMsg').classList.remove('hidden');
-  }else if(G.status==='running'){
-    document.getElementById('claimMsg').classList.add('hidden');
-  }
-
-  if(G.status==='finished'&&!G.winner){
-    document.getElementById('claimMsg').textContent='All 75 numbers were called. No valid BINGO. Next round is opening…';
-    document.getElementById('claimMsg').className='notice';
-    document.getElementById('claimMsg').classList.remove('hidden');
-  }
+    document.getElementById('claimMsg').textContent='🏆 BINGO! '+G.winner.name+' won with Cartela #'+G.winner.cartela_number+' — prize '+money(G.winner.prize||0)+'.';
+    document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
+  }else if(G.status==='running')document.getElementById('claimMsg').classList.add('hidden');
+  if(G.status==='finished'&&!G.winner){document.getElementById('claimMsg').textContent='All 75 numbers were called. No valid BINGO. Next round is opening…';document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');}
 }
-
 function renderChoices(){
-  const taken=new Set((G?.players||[]).map(p=>Number(p.cartela_number)));
-  const q=Number(document.getElementById('cartelaSearch')?.value||0);
-  let available=0;
-  let h='';
-
-  if(selectedCartela&&taken.has(Number(selectedCartela)))selectedCartela=null;
-
-  for(let n=1;n<=200;n++){
-    const used=taken.has(n);
-    if(!used)available++;
-    if(q&&n!==q)continue;
-    h+=`<button type="button" class="pick ${used?'taken':''} ${selectedCartela===n?'selected':''}" ${used?'disabled':''} aria-label="Cartela ${n}${used?' taken':' available'}" onclick="selectCartela(${n})">${n}</button>`;
-  }
-
-  document.getElementById('choices').innerHTML=h||'<div class="muted small">No cartela matches that number.</div>';
-  document.getElementById('availableCount').textContent=available+' available';
-  document.getElementById('selectedCartelaLabel').textContent=selectedCartela?('#'+selectedCartela):'None';
-  document.getElementById('startGameBtn').disabled=!selectedCartela||taken.has(Number(selectedCartela))||G?.status!=='waiting';
+ const taken=new Set((G?.players||[]).map(p=>Number(p.cartela_number)));
+ const q=Number(document.getElementById('cartelaSearch')?.value||0);let available=0,h='';
+ for(let n=1;n<=200;n++){
+  const used=taken.has(n);if(!used)available++;if(q&&n!==q)continue;
+  h+=`<button type="button" class="pick ${used?'taken':''} ${selectedCartelas.has(n)?'selected':''}" ${used?'disabled':''} aria-label="Cartela ${n}${used?' taken':' available'}" onclick="selectCartela(${n})">${n}</button>`;
+ }
+ document.getElementById('choices').innerHTML=h||'<div class="muted small">No cartela matches that number.</div>';
+ document.getElementById('availableCount').textContent=available+' available';
+ updateSelectionSummary();
+ document.getElementById('startGameBtn').disabled=!selectedCartelas.size||[...selectedCartelas].some(n=>taken.has(n))||G?.status!=='waiting';
 }
-
 function selectCartela(n){
-  const taken=new Set((G?.players||[]).map(p=>Number(p.cartela_number)));
-  if(taken.has(n)||G?.status!=='waiting')return;
-  selectedCartela=n;
-  const search=document.getElementById('cartelaSearch');
-  if(search)search.value='';
-  renderChoices();
+ const taken=new Set((G?.players||[]).map(p=>Number(p.cartela_number)));if(taken.has(n)||G?.status!=='waiting')return;
+ if(selectedCartelas.has(n))selectedCartelas.delete(n);else selectedCartelas.add(n);
+ const search=document.getElementById('cartelaSearch');if(search)search.value='';renderChoices();
 }
-
+function updateSelectionSummary(){
+ const stake=Number(document.getElementById('stake')?.value||30),count=selectedCartelas.size;
+ document.getElementById('selectedCartelaLabel').textContent=count?[...selectedCartelas].sort((a,b)=>a-b).map(n=>'#'+n).join(', '):'None';
+ document.getElementById('betSummary').textContent=count?`${count} cartela(s) × ${money(stake)} = ${money(count*stake)} total bet (minimum ${money(30)} per cartela).`:'Select one or more cartelas. Minimum bet is 30 Birr per cartela.';
+}
 async function startSelectedGame(){
-  if(!selectedCartela){
-    msg('Please select an available cartela first.',true);
-    return;
-  }
-  await joinGame(selectedCartela);
-  if(G?.my_cartela)go('game');
+ const stake=Number(document.getElementById('stake').value||0);
+ if(!selectedCartelas.size){msg('Please select at least one available cartela.',true);return;}
+ if(!Number.isFinite(stake)||stake<30||stake>1000){msg('Minimum bet is 30 Birr per cartela.',true);return;}
+ await joinGame([...selectedCartelas],stake);
+ if((G?.my_cartelas||[]).length)go('game');
 }
-
-async function joinGame(n){
-  if(busy)return;
-  busy=true;
-  document.getElementById('startGameBtn').disabled=true;
-  try{
-    await api('/api/game/join',{
-      method:'POST',
-      body:JSON.stringify({
-        cartela_number:n,
-        stake:Number(document.getElementById('stake').value||0)
-      })
-    });
-    winCells=[];
-    manualMarks.clear();manualMarks.add(0);
-    msg('Cartela #'+n+' reserved. You are in the game!');
-    telegramApp()?.HapticFeedback?.notificationOccurred('success');
-    await refreshGame();
-  }catch(e){
-    msg(e.message,true);
-    await refreshGame().catch(()=>{});
-  }finally{
-    busy=false;
-    if(G&&!G.my_cartela)renderChoices();
-  }
+async function joinGame(nums,stake){
+ if(busy)return;busy=true;document.getElementById('startGameBtn').disabled=true;
+ try{
+  await api('/api/game/join',{method:'POST',body:JSON.stringify({cartela_numbers:nums,stake})});
+  winCells=[];for(const n of nums)manualMarksByCard[n]=new Set([0]);
+  selectedCartelas.clear();msg(`${nums.length} cartela(s) reserved. Total bet: ${money(nums.length*stake)}.`);
+  telegramApp()?.HapticFeedback?.notificationOccurred('success');await refreshGame();
+ }catch(e){msg(e.message,true);await refreshGame().catch(()=>{});}
+ finally{busy=false;if(G&&!(G.my_cartelas||[]).length)renderChoices();}
 }
-
 function callLabel(n){
   n=Number(n);
   return (n<=15?'B':n<=30?'I':n<=45?'N':n<=60?'G':'O')+n;
 }
 
-function renderCard(card,called,wins=[]){
-  const set=new Set(wins.map(x=>x.join(',')));
-  document.getElementById('myCard').innerHTML=card.flatMap((row,r)=>row.map((n,c)=>{
-    const marked=n===0||manualMarks.has(n);
-    const wasCalled=n===0||called.includes(n);
-    return `<button type="button" class="cell ${marked?'marked':''} ${!wasCalled?'uncalled':''} ${set.has([r,c].join(','))?'win':''}" ${n===0||!called.includes(n)?'disabled':''} onclick="toggleMark(${n})" aria-label="Mark ${n}">${n===0?'★':n}</button>`;
+function renderCards(cards,called,wins=[]){
+ const host=document.getElementById('myCards');
+ host.innerHTML=cards.map(entry=>{
+  const n=Number(entry.cartela_number),card=entry.cartela;const marks=manualMarksByCard[n]||new Set([0]);manualMarksByCard[n]=marks;
+  const winSet=new Set((wins||[]).map(x=>x.join(',')));
+  const cells=card.flatMap((row,r)=>row.map((v,c)=>{
+   const marked=v===0||marks.has(v),wasCalled=v===0||called.includes(v);
+   return `<button type="button" class="cell ${marked?'marked':''} ${!wasCalled?'uncalled':''} ${winSet.has([r,c].join(','))?'win':''}" ${v===0||!called.includes(v)||G.status!=='running'?'disabled':''} onclick="toggleMark(${n},${v})" aria-label="Cartela ${n}, number ${v}">${v===0?'★':v}</button>`;
   })).join('');
+  return `<div class="my-card-item"><div class="card-caption"><b>Cartela #${n}</b><span class="muted">Bet ${money(entry.stake||0)}</span></div><div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div><div class="card">${cells}</div><button class="danger wide" style="padding:10px" onclick="claim(${n})" ${G.status!=='running'?'disabled':''}>🏆 BINGO! — Cartela #${n}</button></div>`;
+ }).join('');
 }
-function toggleMark(n){
-  n=Number(n);
-  if(!G||!G.called.includes(n)||n===0)return;
-  if(manualMarks.has(n))manualMarks.delete(n);else manualMarks.add(n);
-  renderCard(G.my_cartela,G.called,winCells);
+function toggleMark(cartela,n){
+ n=Number(n);cartela=Number(cartela);if(!G||!G.called.includes(n)||n===0)return;
+ const marks=manualMarksByCard[cartela]||(manualMarksByCard[cartela]=new Set([0]));
+ if(marks.has(n))marks.delete(n);else marks.add(n);
+ renderCards(G.my_cartelas||[],G.called,winCells);
 }
-
-async function claim(){
-  try{
-    const r=await api('/api/game/claim',{method:'POST',body:JSON.stringify({marked:[...manualMarks]})});
-    winCells=r.pattern||[];
-    document.getElementById('claimMsg').textContent=t('claimok');
-    document.getElementById('claimMsg').className='notice';
-    document.getElementById('claimMsg').classList.remove('hidden');
-    await refreshGame();
-    await refreshWallet();
-    telegramApp()?.HapticFeedback?.notificationOccurred('success');
-  }catch(e){
-    document.getElementById('claimMsg').textContent=e.message;
-    document.getElementById('claimMsg').className='notice err';
-    document.getElementById('claimMsg').classList.remove('hidden');
-  }
+async function claim(cartela){
+ try{
+  const marks=manualMarksByCard[Number(cartela)]||new Set([0]);
+  const r=await api('/api/game/claim',{method:'POST',body:JSON.stringify({cartela_number:Number(cartela),marked:[...marks]})});
+  winCells=r.pattern||[];
+  document.getElementById('claimMsg').textContent=`🏆 Valid BINGO! Prize: ${money(r.prize)} (80% of ${money(r.total_bets)} total bets).`;
+  document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
+  await refreshGame();await refreshWallet();telegramApp()?.HapticFeedback?.notificationOccurred('success');
+ }catch(e){document.getElementById('claimMsg').textContent=e.message;document.getElementById('claimMsg').className='notice err';document.getElementById('claimMsg').classList.remove('hidden');}
 }
 
 async function refreshWallet(){
@@ -670,15 +626,16 @@ const depositRecipients=[
  {title:'Tinsae Merga',detail:'0934417096',provider:'Phone recipient'},
  {title:'CBE Bank',detail:'1000261740528',provider:'CBE account'}
 ];
+function chooseProvider(p){document.getElementById('provider').value=p;document.querySelectorAll('[data-provider-brand]').forEach(b=>b.classList.toggle('active',b.dataset.providerBrand===p));showDepositDetails();}
 function showDepositDetails(){
- const p=document.getElementById('provider').value;
+ const p=document.getElementById('provider').value;document.querySelectorAll('[data-provider-brand]').forEach(b=>b.classList.toggle('active',b.dataset.providerBrand===p));
  const host=document.getElementById('depositDetails');
  if(p==='ebirr'){
   host.innerHTML='<div class="notice">eBirr recipient details will be added when you provide them. Do not send money until the correct eBirr details are shown.</div>';
   return;
  }
  const rows=p==='cbe_bank'?depositRecipients.filter(x=>x.title==='CBE Bank'):depositRecipients.filter(x=>x.title!=='CBE Bank');
- host.innerHTML=rows.map((x,i)=>`<div class="provider-row"><div class="provider-logo">${x.title==='CBE Bank'?'CBE':p==='telebirr'?'T':'eB'}</div><div class="details"><b>${esc(x.title)}</b><div class="muted small">${esc(x.detail)}</div><small class="muted">${esc(x.provider)}</small></div><button class="copy-small" onclick="copyValue('${x.detail}')">Copy</button></div>`).join('');
+ host.innerHTML=rows.map((x,i)=>`<div class="provider-row"><div class="provider-logo">${x.title==='CBE Bank'?'<svg viewBox="0 0 40 30" width="30" height="24"><path d="M20 2 37 10 20 28 3 10Z" fill="#f0b323"/><path d="M20 6 32 11 20 24 8 11Z" fill="#0755a4"/></svg>':p==='telebirr'?'<b style="color:#16c784">tele</b>':'<b style="color:#5be18e">eBirr</b>'}</div><div class="details"><b>${esc(x.title)}</b><div class="muted small">${esc(x.detail)}</div><small class="muted">${esc(x.provider)}</small></div><button class="copy-small" onclick="copyValue('${x.detail}')">Copy</button></div>`).join('');
 }
 async function copyValue(value){
  try{
