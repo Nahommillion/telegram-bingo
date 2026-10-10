@@ -1,4 +1,4 @@
-import os,json,asyncio,random,hmac,hashlib,urllib.parse,time,secrets
+import os,json,asyncio,random,hmac,hashlib,urllib.parse,time,secrets,logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from decimal import Decimal
@@ -11,6 +11,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from telegram import Update,KeyboardButton,ReplyKeyboardMarkup,WebAppInfo,InlineKeyboardMarkup,InlineKeyboardButton
 from telegram.ext import Application,CommandHandler,MessageHandler,ContextTypes,filters
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("cartela_bingo")
 BOT=os.getenv("TELEGRAM_BOT_TOKEN","").strip(); DB=os.getenv("DATABASE_URL","").strip()
 WEB=os.getenv("WEB_APP_URL","https://telegram-bingo-zq2q.onrender.com/app").strip()
 SUPPORT=os.getenv("SUPPORT_URL","").strip(); PAYKEY=os.getenv("PAYMENT_INGEST_API_KEY","").strip()
@@ -53,11 +55,21 @@ def kb(l):
  return ReplyKeyboardMarkup([[KeyboardButton(x,web_app=WebAppInfo(url=WEB)) if x in ("🎮 Play Now","🎮 አሁን ይጫወቱ") else KeyboardButton(x) for x in r] for r in rows],resize_keyboard=True,one_time_keyboard=False,is_persistent=False)
 def wel(l):return ("🎉🎱 እንኳን ወደ Cartela Bingo በደህና መጡ!\n🇪🇹 የኢትዮጵያ ቀለሞች • ቢንጎ • ደስታ\n👇 ከታች ያለውን አዝራር ይምረጡ!" if l=="am" else "🎉🎱 Welcome to Cartela Bingo!\n🇪🇹 Ethiopian colors • Bingo • Fun\n👇 Choose an option below!")
 async def sendwel(up,l=None):
- l=l or await langof(up.effective_user.id); p=STATIC/"bingo.PNG"
- if p.exists():await up.effective_message.reply_photo(str(p),caption=wel(l),reply_markup=kb(l))
- else:await up.effective_message.reply_text(wel(l),reply_markup=kb(l))
+ l=l or await langof(up.effective_user.id)
+ p=STATIC/"bingo.PNG"
+ if p.exists():
+  try:
+   await up.effective_message.reply_photo(
+    photo=str(p), caption=wel(l), reply_markup=kb(l)
+   )
+   return
+  except Exception:
+   logger.exception("Welcome image failed; sending text fallback")
+ await up.effective_message.reply_text(wel(l),reply_markup=kb(l))
 async def start(up,ctx):
- u=up.effective_user; await reg(u.id,u.username,u.first_name,"am" if (u.language_code or "").startswith("am") else "en")
+ u=up.effective_user
+ logger.info("Received /start update")
+ await reg(u.id,u.username,u.first_name,"am" if (u.language_code or "").startswith("am") else "en")
  if ctx.args and ctx.args[0].startswith("ref_"):
   try:
    r=int(ctx.args[0][4:])
@@ -66,7 +78,7 @@ async def start(up,ctx):
   except ValueError:pass
  await sendwel(up)
 async def bottext(up,ctx):
- u=up.effective_user;m=up.effective_message;s=(m.text or "").strip();await reg(u.id,u.username,u.first_name);l=await langof(u.id)
+ u=up.effective_user;m=up.effective_message;s=(m.text or "").strip();logger.info("Received a non-command text update");await reg(u.id,u.username,u.first_name);l=await langof(u.id)
  if ctx.user_data.get("rename"):
   async with engine.begin() as c:await c.execute(text("UPDATE bingo_users SET display_name=:n WHERE telegram_id=:i"),{"n":s[:100],"i":u.id})
   ctx.user_data["rename"]=False;await m.reply_text("✅ Name updated.",reply_markup=kb(l));return
@@ -120,13 +132,32 @@ async def loop():
    elif g["status"]=="finished":
     async with engine.begin() as c:gid=(await c.execute(text("INSERT INTO bingo_games(status) VALUES('waiting') RETURNING id"))).scalar_one()
     g.update(id=gid,status="waiting",seconds=30,called=[],players={},winner=None,seq=[],last=0)
+async def telegram_error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+ logger.error("Telegram update processing failed", exc_info=context.error)
+
 @asynccontextmanager
 async def lifespan(app):
  global bot,ticker
- await dbinit();ticker=asyncio.create_task(loop())
+ await dbinit()
+ ticker=asyncio.create_task(loop())
  if BOT:
-  bot=Application.builder().token(BOT).build();bot.add_handler(CommandHandler("start",start));bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,bottext));await bot.initialize();await bot.start()
-  if bot.updater:await bot.updater.start_polling(drop_pending_updates=False)
+  logger.info("Starting Telegram bot polling")
+  bot=Application.builder().token(BOT).build()
+  bot.add_handler(CommandHandler("start",start))
+  bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,bottext))
+  bot.add_error_handler(telegram_error_handler)
+  await bot.initialize()
+  # This service uses long polling, so remove any old webhook configuration first.
+  # Pending updates are preserved.
+  await bot.bot.delete_webhook(drop_pending_updates=False)
+  await bot.start()
+  if bot.updater:
+   await bot.updater.start_polling(drop_pending_updates=False)
+   logger.info("Telegram polling started successfully")
+  else:
+   logger.error("Telegram polling did not start: updater is unavailable")
+ else:
+  logger.error("TELEGRAM_BOT_TOKEN is empty; Telegram bot is disabled")
  yield
  if ticker:ticker.cancel()
  if bot:
