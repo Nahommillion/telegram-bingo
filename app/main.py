@@ -1,910 +1,240 @@
-
-import os
-import logging
-from pathlib import Path
+import os,json,asyncio,random,hmac,hashlib,urllib.parse,time,secrets
 from contextlib import asynccontextmanager
-
-from fastapi import FastAPI
+from pathlib import Path
+from decimal import Decimal
+from typing import Optional
+from fastapi import FastAPI,HTTPException,Header,Request,WebSocket,WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel,Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
-
-from telegram import (
-    Update,
-    KeyboardButton,
-    ReplyKeyboardMarkup,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    WebAppInfo,
-)
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
-
-# =========================================================
-# CONFIGURATION
-# =========================================================
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logger = logging.getLogger(__name__)
-
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-WEB_APP_URL = os.getenv(
-    "WEB_APP_URL",
-    "https://telegram-bingo-zq2q.onrender.com/app",
-).strip()
-SUPPORT_URL = os.getenv("SUPPORT_URL", "").strip()
-
-BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "static"
-LOGO_PATH = STATIC_DIR / "bingo.PNG"
-
-STATIC_DIR.mkdir(parents=True, exist_ok=True)
-
-engine = None
-telegram_app = None
-
-
-# =========================================================
-# KEYBOARDS
-# =========================================================
-
-MENUS = {
-    "en": [
-        ["🎮 Play Now", "💰 Check Balance"],
-        ["➕ Make Deposit", "🆘 Support"],
-        ["📖 Instructions", "🏆 Win Patterns"],
-        ["✏️ Change Username", "👥 Invite"],
-        ["🥇 Leaderboard", "📜 Transaction History"],
-        ["🌐 Change Language"],
-    ],
-    "am": [
-        ["🎮 አሁን ይጫወቱ", "💰 ቀሪ ሂሳብ"],
-        ["➕ ገንዘብ ያስገቡ", "🆘 ድጋፍ"],
-        ["📖 መመሪያ", "🏆 የማሸነፊያ ቅጦች"],
-        ["✏️ ስም ይቀይሩ", "👥 ጓደኞችን ይጋብዙ"],
-        ["🥇 ደረጃ ሰንጠረዥ", "📜 የግብይት ታሪክ"],
-        ["🌐 ቋንቋ ይቀይሩ"],
-    ],
-}
-
-ACTIONS = {
-    "🎮 Play Now": "play",
-    "💰 Check Balance": "balance",
-    "➕ Make Deposit": "deposit",
-    "🆘 Support": "support",
-    "📖 Instructions": "instructions",
-    "🏆 Win Patterns": "patterns",
-    "✏️ Change Username": "username",
-    "👥 Invite": "invite",
-    "👥 Invite Friends": "invite",
-    "🥇 Leaderboard": "leaderboard",
-    "📜 Transaction History": "history",
-    "🌐 Change Language": "language",
-
-    "🎮 አሁን ይጫወቱ": "play",
-    "💰 ቀሪ ሂሳብ": "balance",
-    "➕ ገንዘብ ያስገቡ": "deposit",
-    "🆘 ድጋፍ": "support",
-    "📖 መመሪያ": "instructions",
-    "🏆 የማሸነፊያ ቅጦች": "patterns",
-    "✏️ ስም ይቀይሩ": "username",
-    "👥 ጓደኞችን ይጋብዙ": "invite",
-    "🥇 ደረጃ ሰንጠረዥ": "leaderboard",
-    "📜 የግብይት ታሪክ": "history",
-    "🌐 ቋንቋ ይቀይሩ": "language",
-}
-
-
-def make_keyboard(language):
-    rows = []
-
-    for row in MENUS[language]:
-        buttons = []
-
-        for label in row:
-            if label in ("🎮 Play Now", "🎮 አሁን ይጫወቱ"):
-                buttons.append(
-                    KeyboardButton(
-                        text=label,
-                        web_app=WebAppInfo(url=WEB_APP_URL),
-                    )
-                )
-            else:
-                buttons.append(KeyboardButton(text=label))
-
-        rows.append(buttons)
-
-    return ReplyKeyboardMarkup(
-        rows,
-        resize_keyboard=True,
-        one_time_keyboard=False,
-        is_persistent=False,
-        input_field_placeholder=(
-            "Choose a Bingo option 🎱"
-            if language == "en"
-            else "የቢንጎ አማራጭ ይምረጡ 🎱"
-        ),
-    )
-
-
-# =========================================================
-# WELCOME MESSAGES
-# =========================================================
-
-def welcome_message(language):
-    if language == "am":
-        return (
-            "🎉🎱 እንኳን ወደ Cartela Bingo በደህና መጡ!\n"
-            "━━━━━━━━━━━━━━━━━━\n"
-            "👋 ሰላም! ከእኛ ጋር ለመጫወት ዝግጁ ነዎት?\n\n"
-            "🎮 አሁን ይጫወቱ — ወደ ጨዋታው ይግቡ\n"
-            "💰 ቀሪ ሂሳብዎን ይመልከቱ\n"
-            "🏆 የማሸነፊያ ቅጦችን ይመልከቱ\n"
-            "👥 ጓደኞችዎን ይጋብዙ\n\n"
-            "👇 ከታች ካሉት አዝራሮች አንዱን ይጫኑ!\n\n"
-            "🎊 መልካም ጨዋታ!"
-        )
-
-    return (
-        "🎉🎱 Welcome to Cartela Bingo!\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "👋 Hello, Bingo player! Ready to join the fun?\n\n"
-        "🎮 Play Now — enter the Bingo app\n"
-        "💰 Check your balance\n"
-        "🏆 Explore winning patterns\n"
-        "👥 Invite your friends\n\n"
-        "👇 Tap any button on the keyboard below "
-        "to open the section you want!\n\n"
-        "🎊 Good luck and enjoy the game!"
-    )
-
-
-async def send_welcome(update: Update, language=None):
-    if language is None:
-        language = await get_language(update.effective_user.id)
-
-    message = update.effective_message
-    keyboard = make_keyboard(language)
-    caption = welcome_message(language)
-
-    if LOGO_PATH.is_file():
-        await message.reply_photo(
-            photo=str(LOGO_PATH),
-            caption=caption,
-            reply_markup=keyboard,
-        )
-    else:
-        logger.warning("Logo not found at %s", LOGO_PATH)
-        await message.reply_text(
-            caption,
-            reply_markup=keyboard,
-        )
-
-
-# =========================================================
-# DATABASE
-# =========================================================
-
-async def setup_database():
-    global engine
-
-    if not DATABASE_URL:
-        raise RuntimeError(
-            "DATABASE_URL is missing from Render Environment."
-        )
-
-    if DATABASE_URL.startswith("postgres://"):
-        database_url = DATABASE_URL.replace(
-            "postgres://", "postgresql+asyncpg://", 1
-        )
-    elif DATABASE_URL.startswith("postgresql://"):
-        database_url = DATABASE_URL.replace(
-            "postgresql://", "postgresql+asyncpg://", 1
-        )
-    else:
-        database_url = DATABASE_URL
-
-    engine = create_async_engine(
-        database_url,
-        pool_pre_ping=True,
-    )
-
-    async with engine.begin() as conn:
-        await conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS bingo_users (
-                id BIGSERIAL PRIMARY KEY,
-                telegram_id BIGINT UNIQUE NOT NULL,
-                username VARCHAR(100),
-                display_name VARCHAR(100),
-                language VARCHAR(5) NOT NULL DEFAULT 'en',
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        """))
-
-        await conn.execute(text("""
-            ALTER TABLE bingo_users
-            ADD COLUMN IF NOT EXISTS display_name VARCHAR(100)
-        """))
-
-        await conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS bingo_wallets (
-                id BIGSERIAL PRIMARY KEY,
-                telegram_id BIGINT UNIQUE NOT NULL,
-                balance NUMERIC(14, 2) NOT NULL DEFAULT 0,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        """))
-
-        await conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS bingo_transactions (
-                id BIGSERIAL PRIMARY KEY,
-                telegram_id BIGINT NOT NULL,
-                transaction_type VARCHAR(30) NOT NULL,
-                amount NUMERIC(14, 2) NOT NULL,
-                status VARCHAR(30) NOT NULL DEFAULT 'pending',
-                description TEXT,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        """))
-
-        await conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS bingo_referrals (
-                id BIGSERIAL PRIMARY KEY,
-                referrer_telegram_id BIGINT NOT NULL,
-                referred_telegram_id BIGINT UNIQUE NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-        """))
-
-    logger.info("Database tables are ready.")
-
-
-async def ensure_user(user):
-    async with engine.begin() as conn:
-        await conn.execute(
-            text("""
-                INSERT INTO bingo_users
-                    (telegram_id, username, display_name, language)
-                VALUES
-                    (:tid, :username, :display_name, :language)
-                ON CONFLICT (telegram_id)
-                DO UPDATE SET username = EXCLUDED.username
-            """),
-            {
-                "tid": user.id,
-                "username": user.username,
-                "display_name": user.first_name or "Player",
-                "language": (
-                    "am"
-                    if (user.language_code or "").lower().startswith("am")
-                    else "en"
-                ),
-            },
-        )
-
-        await conn.execute(
-            text("""
-                INSERT INTO bingo_wallets (telegram_id, balance)
-                VALUES (:tid, 0)
-                ON CONFLICT (telegram_id) DO NOTHING
-            """),
-            {"tid": user.id},
-        )
-
-
-async def get_language(telegram_id):
-    async with engine.connect() as conn:
-        result = await conn.execute(
-            text("""
-                SELECT language FROM bingo_users
-                WHERE telegram_id = :tid
-            """),
-            {"tid": telegram_id},
-        )
-        row = result.first()
-
-    return row[0] if row and row[0] in ("en", "am") else "en"
-
-
-async def set_language(telegram_id, language):
-    async with engine.begin() as conn:
-        await conn.execute(
-            text("""
-                UPDATE bingo_users
-                SET language = :language
-                WHERE telegram_id = :tid
-            """),
-            {"language": language, "tid": telegram_id},
-        )
-
-
-async def get_balance(telegram_id):
-    async with engine.connect() as conn:
-        result = await conn.execute(
-            text("""
-                SELECT balance FROM bingo_wallets
-                WHERE telegram_id = :tid
-            """),
-            {"tid": telegram_id},
-        )
-        row = result.first()
-
-    return float(row[0]) if row else 0.0
-
-
-# =========================================================
-# START COMMAND AND REFERRALS
-# =========================================================
-
-async def start_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    user = update.effective_user
-    await ensure_user(user)
-
-    if context.args:
-        referral_arg = context.args[0]
-
-        if referral_arg.startswith("ref_"):
-            try:
-                referrer_id = int(referral_arg[4:])
-
-                if referrer_id != user.id:
-                    async with engine.begin() as conn:
-                        await conn.execute(
-                            text("""
-                                INSERT INTO bingo_referrals
-                                    (referrer_telegram_id,
-                                     referred_telegram_id)
-                                VALUES (:referrer, :referred)
-                                ON CONFLICT (referred_telegram_id)
-                                DO NOTHING
-                            """),
-                            {
-                                "referrer": referrer_id,
-                                "referred": user.id,
-                            },
-                        )
-            except ValueError:
-                logger.info("Invalid referral code.")
-
-    await send_welcome(update)
-
-
-# =========================================================
-# BUTTON HANDLER
-# =========================================================
-
-async def menu_handler(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-):
-    message = update.effective_message
-    user = update.effective_user
-    selected = (message.text or "").strip()
-
-    await ensure_user(user)
-    language = await get_language(user.id)
-
-    # Username entry
-    if context.user_data.get("waiting_for_username"):
-        if selected.startswith("/"):
-            context.user_data["waiting_for_username"] = False
-            await message.reply_text(
-                "Name change cancelled.",
-                reply_markup=make_keyboard(language),
-            )
-            return
-
-        new_name = selected.strip()
-
-        if not new_name or len(new_name) > 100:
-            await message.reply_text(
-                "Please enter a name from 1 to 100 characters."
-                if language == "en"
-                else "እባክዎ ከ1 እስከ 100 ቁምፊ ያለውን ስም ያስገቡ።",
-                reply_markup=make_keyboard(language),
-            )
-            return
-
-        async with engine.begin() as conn:
-            await conn.execute(
-                text("""
-                    UPDATE bingo_users
-                    SET display_name = :name
-                    WHERE telegram_id = :tid
-                """),
-                {"name": new_name, "tid": user.id},
-            )
-
-        context.user_data["waiting_for_username"] = False
-
-        await message.reply_text(
-            (
-                f"✅ Your display name is now: {new_name}"
-                if language == "en"
-                else f"✅ አዲሱ ስምዎ: {new_name}"
-            ),
-            reply_markup=make_keyboard(language),
-        )
-        return
-
-    action = ACTIONS.get(selected)
-
-    if not action:
-        await message.reply_text(
-            "Please choose a button from the keyboard below. 👇"
-            if language == "en"
-            else "እባክዎ ከታች ካለው የቁልፍ ሰሌዳ አዝራር ይምረጡ። 👇",
-            reply_markup=make_keyboard(language),
-        )
-        return
-
-    # PLAY NOW
-    if action == "play":
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton(
-                text=(
-                    "🎮 Open Bingo Game"
-                    if language == "en"
-                    else "🎮 ቢንጎን ይክፈቱ"
-                ),
-                web_app=WebAppInfo(url=WEB_APP_URL),
-            )
-        ]])
-
-        await message.reply_text(
-            (
-                "🎱 Welcome to the Bingo game!\n"
-                "Tap below to open the Mini App."
-                if language == "en"
-                else
-                "🎱 ወደ ቢንጎ ጨዋታ እንኳን በደህና መጡ!\n"
-                "Mini App ለመክፈት ከታች ይጫኑ።"
-            ),
-            reply_markup=keyboard,
-        )
-
-    # BALANCE
-    elif action == "balance":
-        balance = await get_balance(user.id)
-        await message.reply_text(
-            (
-                f"💰 Your Bingo balance: {balance:,.2f} Birr\n"
-                "🔒 Only verified transactions affect your balance."
-                if language == "en"
-                else
-                f"💰 የቢንጎ ቀሪ ሂሳብዎ: {balance:,.2f} ብር\n"
-                "🔒 የተረጋገጡ ግብይቶች ብቻ ሂሳብዎን ይቀይራሉ።"
-            ),
-            reply_markup=make_keyboard(language),
-        )
-
-    # DEPOSIT
-    elif action == "deposit":
-        await message.reply_text(
-            (
-                "➕ Deposits are not enabled yet.\n\n"
-                "🛡️ Do not send money until official payment "
-                "verification has been configured."
-                if language == "en"
-                else
-                "➕ የገንዘብ ማስገባት ገና አልተጀመረም።\n\n"
-                "🛡️ ይፋዊ የክፍያ ማረጋገጫ እስኪዘጋጅ ድረስ "
-                "ገንዘብ አይላኩ።"
-            ),
-            reply_markup=make_keyboard(language),
-        )
-
-    # SUPPORT
-    elif action == "support":
-        if SUPPORT_URL:
-            await message.reply_text(
-                (
-                    "🆘 Tap below to contact support."
-                    if language == "en"
-                    else "🆘 ድጋፍን ለማግኘት ከታች ይጫኑ።"
-                ),
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton(
-                        text="🆘 Contact Support",
-                        url=SUPPORT_URL,
-                    )
-                ]]),
-            )
-        else:
-            await message.reply_text(
-                "🆘 Support contact has not been configured yet."
-                if language == "en"
-                else "🆘 የድጋፍ አድራሻ ገና አልተዘጋጀም።",
-                reply_markup=make_keyboard(language),
-            )
-
-    # INSTRUCTIONS
-    elif action == "instructions":
-        await message.reply_text(
-            (
-                "📖 HOW TO PLAY BINGO\n\n"
-                "1️⃣ Press Play Now to open the Mini App.\n"
-                "2️⃣ Choose an available cartela when the game is ready.\n"
-                "3️⃣ Select a stake when betting is enabled.\n"
-                "4️⃣ Watch the called numbers.\n"
-                "5️⃣ Claim Bingo when your card matches a valid pattern.\n\n"
-                "🛡️ Always use official, verified payment channels."
-                if language == "en"
-                else
-                "📖 ቢንጎ እንዴት ይጫወታሉ?\n\n"
-                "1️⃣ Mini App ለመክፈት አሁን ይጫወቱን ይጫኑ።\n"
-                "2️⃣ ጨዋታው ሲዘጋጅ ያልተያዘ ካርቴላ ይምረጡ።\n"
-                "3️⃣ ውርርድ ሲነቃ የውርርድ መጠን ይምረጡ።\n"
-                "4️⃣ የሚጠሩትን ቁጥሮች ይከታተሉ።\n"
-                "5️⃣ ትክክለኛ ቅጥ ሲሞላ ቢንጎ ይጠይቁ።\n\n"
-                "🛡️ ይፋዊ የክፍያ መንገዶችን ብቻ ይጠቀሙ።"
-            ),
-            reply_markup=make_keyboard(language),
-        )
-
-    # WIN PATTERNS
-    elif action == "patterns":
-        await message.reply_text(
-            (
-                "🏆 WINNING PATTERNS\n\n"
-                "The official winning-pattern guide will be added "
-                "when the game patterns are configured."
-                if language == "en"
-                else
-                "🏆 የማሸነፊያ ቅጦች\n\n"
-                "የጨዋታው ቅጦች ሲዘጋጁ ይፋዊው መመሪያ እዚህ ይታያል።"
-            ),
-            reply_markup=make_keyboard(language),
-        )
-
-    # CHANGE USERNAME
-    elif action == "username":
-        context.user_data["waiting_for_username"] = True
-        await message.reply_text(
-            (
-                "✏️ Send your preferred display name "
-                "(maximum 100 characters)."
-                if language == "en"
-                else "✏️ መጠቀም የሚፈልጉትን ስም ይላኩ "
-                     "(ከፍተኛው 100 ቁምፊ)።"
-            ),
-            reply_markup=make_keyboard(language),
-        )
-
-    # INVITE FRIENDS
-    elif action == "invite":
-        bot_username = context.bot.username
-
-        if bot_username:
-            referral_link = (
-                f"https://t.me/{bot_username}?start=ref_{user.id}"
-            )
-            await message.reply_text(
-                (
-                    "👥 INVITE FRIENDS\n\n"
-                    "Share your personal referral link:\n"
-                    f"{referral_link}\n\n"
-                    "Referral rewards are not enabled yet."
-                    if language == "en"
-                    else
-                    "👥 ጓደኞችን ይጋብዙ\n\n"
-                    "የግል የግብዣ ሊንክዎን ያጋሩ:\n"
-                    f"{referral_link}\n\n"
-                    "የግብዣ ሽልማቶች ገና አልተጀመሩም።"
-                ),
-                reply_markup=make_keyboard(language),
-            )
-        else:
-            await message.reply_text(
-                "Bot username is not available yet.",
-                reply_markup=make_keyboard(language),
-            )
-
-    # LEADERBOARD
-    elif action == "leaderboard":
-        await message.reply_text(
-            (
-                "🥇 LEADERBOARD\n\n"
-                "The leaderboard will be available when the game "
-                "and scoring system are implemented."
-                if language == "en"
-                else
-                "🥇 የደረጃ ሰንጠረዥ\n\n"
-                "ጨዋታውና የነጥብ ስርዓቱ ሲዘጋጁ ይገኛል።"
-            ),
-            reply_markup=make_keyboard(language),
-        )
-
-    # TRANSACTION HISTORY
-    elif action == "history":
-        async with engine.connect() as conn:
-            result = await conn.execute(
-                text("""
-                    SELECT transaction_type, amount, status, created_at
-                    FROM bingo_transactions
-                    WHERE telegram_id = :tid
-                    ORDER BY created_at DESC
-                    LIMIT 10
-                """),
-                {"tid": user.id},
-            )
-            rows = result.fetchall()
-
-        if not rows:
-            history_text = (
-                "📜 You have no transactions yet."
-                if language == "en"
-                else "📜 እስካሁን ምንም ግብይት የለዎትም።"
-            )
-        else:
-            history_text = (
-                "📜 RECENT TRANSACTIONS\n\n"
-                if language == "en"
-                else "📜 የቅርብ ጊዜ ግብይቶች\n\n"
-            )
-
-            for tx_type, amount, status, created_at in rows:
-                history_text += (
-                    f"• {tx_type} | {float(amount):,.2f} Birr "
-                    f"| {status} | {created_at:%Y-%m-%d %H:%M}\n"
-                )
-
-        await message.reply_text(
-            history_text,
-            reply_markup=make_keyboard(language),
-        )
-
-    # CHANGE LANGUAGE
-    elif action == "language":
-        new_language = "am" if language == "en" else "en"
-        await set_language(user.id, new_language)
-        await send_welcome(update, new_language)
-
-
-# =========================================================
-# FASTAPI LIFESPAN / TELEGRAM POLLING
-# =========================================================
-
+from telegram import Update,KeyboardButton,ReplyKeyboardMarkup,WebAppInfo,InlineKeyboardMarkup,InlineKeyboardButton
+from telegram.ext import Application,CommandHandler,MessageHandler,ContextTypes,filters
+BOT=os.getenv("TELEGRAM_BOT_TOKEN","").strip(); DB=os.getenv("DATABASE_URL","").strip()
+WEB=os.getenv("WEB_APP_URL","https://telegram-bingo-zq2q.onrender.com/app").strip()
+SUPPORT=os.getenv("SUPPORT_URL","").strip(); PAYKEY=os.getenv("PAYMENT_INGEST_API_KEY","").strip()
+STATIC=Path(__file__).parent/"static"; STATIC.mkdir(exist_ok=True)
+engine=bot=None; ticker=None; lock=asyncio.Lock()
+g={"id":1,"status":"waiting","seconds":30,"called":[],"players":{},"winner":None,"seq":[],"last":0}
+PROVIDERS={"telebirr","cbe_birr","ebirr","cbe_bank"}
+def dsn(x):
+ if x.startswith("postgres://"): return x.replace("postgres://","postgresql+asyncpg://",1)
+ if x.startswith("postgresql://") and not x.startswith("postgresql+asyncpg://"): return x.replace("postgresql://","postgresql+asyncpg://",1)
+ return x
+async def dbinit():
+ global engine
+ if not DB: raise RuntimeError("Set DATABASE_URL in Render.")
+ engine=create_async_engine(dsn(DB),pool_pre_ping=True)
+ qs=[
+ "CREATE TABLE IF NOT EXISTS bingo_users(telegram_id BIGINT PRIMARY KEY,username TEXT,display_name TEXT,language VARCHAR(5) DEFAULT 'en',created_at TIMESTAMPTZ DEFAULT NOW())",
+ "CREATE TABLE IF NOT EXISTS bingo_wallets(telegram_id BIGINT PRIMARY KEY REFERENCES bingo_users(telegram_id),balance NUMERIC(14,2) DEFAULT 0,updated_at TIMESTAMPTZ DEFAULT NOW())",
+ "CREATE TABLE IF NOT EXISTS bingo_transactions(id BIGSERIAL PRIMARY KEY,telegram_id BIGINT,transaction_type TEXT,amount NUMERIC(14,2),status TEXT DEFAULT 'pending',description TEXT,external_reference TEXT UNIQUE,created_at TIMESTAMPTZ DEFAULT NOW())",
+ "CREATE TABLE IF NOT EXISTS bingo_referrals(id BIGSERIAL PRIMARY KEY,referrer_telegram_id BIGINT,referred_telegram_id BIGINT UNIQUE,created_at TIMESTAMPTZ DEFAULT NOW())",
+ "CREATE TABLE IF NOT EXISTS deposit_requests(id BIGSERIAL PRIMARY KEY,telegram_id BIGINT,provider TEXT,amount NUMERIC(14,2),reference TEXT,status TEXT DEFAULT 'pending',created_at TIMESTAMPTZ DEFAULT NOW(),verified_at TIMESTAMPTZ)",
+ "CREATE TABLE IF NOT EXISTS payment_records(id BIGSERIAL PRIMARY KEY,provider TEXT,external_reference TEXT UNIQUE,amount NUMERIC(14,2),payer_reference TEXT,memo TEXT,matched_request_id BIGINT,created_at TIMESTAMPTZ DEFAULT NOW())",
+ "CREATE TABLE IF NOT EXISTS bingo_games(id BIGSERIAL PRIMARY KEY,status TEXT,created_at TIMESTAMPTZ DEFAULT NOW(),started_at TIMESTAMPTZ,finished_at TIMESTAMPTZ,winner_telegram_id BIGINT,called_numbers JSONB DEFAULT '[]'::jsonb)",
+ "CREATE TABLE IF NOT EXISTS bingo_game_players(game_id BIGINT,telegram_id BIGINT,cartela_number INT,cartela JSONB,stake NUMERIC(14,2) DEFAULT 0,PRIMARY KEY(game_id,telegram_id),UNIQUE(game_id,cartela_number))"]
+ async with engine.begin() as c:
+  for q in qs: await c.execute(text(q))
+  r=await c.execute(text("SELECT id,status,called_numbers FROM bingo_games WHERE status IN ('waiting','running') ORDER BY id DESC LIMIT 1")); row=r.first()
+  if row:g.update(id=row[0],status=row[1],called=row[2] or [])
+  else:g["id"]=(await c.execute(text("INSERT INTO bingo_games(status) VALUES('waiting') RETURNING id"))).scalar_one()
+async def reg(tid,username=None,name=None,language="en"):
+ async with engine.begin() as c:
+  await c.execute(text("INSERT INTO bingo_users(telegram_id,username,display_name,language) VALUES(:i,:u,:n,:l) ON CONFLICT(telegram_id) DO UPDATE SET username=COALESCE(EXCLUDED.username,bingo_users.username),display_name=COALESCE(EXCLUDED.display_name,bingo_users.display_name)"),{"i":tid,"u":username,"n":name,"l":language})
+  await c.execute(text("INSERT INTO bingo_wallets(telegram_id) VALUES(:i) ON CONFLICT DO NOTHING"),{"i":tid})
+async def langof(i):
+ async with engine.connect() as c:return (await c.execute(text("SELECT language FROM bingo_users WHERE telegram_id=:i"),{"i":i})).scalar_one_or_none() or "en"
+async def setlang(i,l):
+ async with engine.begin() as c:await c.execute(text("UPDATE bingo_users SET language=:l WHERE telegram_id=:i"),{"l":l,"i":i})
+def kb(l):
+ rows=[["🎮 Play Now","💰 Check Balance"],["➕ Make Deposit","🆘 Support"],["📖 Instructions","🏆 Win Patterns"],["✏️ Change Username","👥 Invite Friends"],["🥇 Leaderboard","📜 Transaction History"],["🌐 Change Language"]] if l=="en" else [["🎮 አሁን ይጫወቱ","💰 ቀሪ ሂሳብ"],["➕ ገንዘብ ያስገቡ","🆘 ድጋፍ"],["📖 መመሪያ","🏆 የማሸነፊያ ቅጦች"],["✏️ ስም ይቀይሩ","👥 ጓደኞችን ይጋብዙ"],["🥇 ደረጃ ሰንጠረዥ","📜 የግብይት ታሪክ"],["🌐 ቋንቋ ይቀይሩ"]]
+ return ReplyKeyboardMarkup([[KeyboardButton(x,web_app=WebAppInfo(url=WEB)) if x in ("🎮 Play Now","🎮 አሁን ይጫወቱ") else KeyboardButton(x) for x in r] for r in rows],resize_keyboard=True,one_time_keyboard=False,is_persistent=False)
+def wel(l):return ("🎉🎱 እንኳን ወደ Cartela Bingo በደህና መጡ!\n🇪🇹 የኢትዮጵያ ቀለሞች • ቢንጎ • ደስታ\n👇 ከታች ያለውን አዝራር ይምረጡ!" if l=="am" else "🎉🎱 Welcome to Cartela Bingo!\n🇪🇹 Ethiopian colors • Bingo • Fun\n👇 Choose an option below!")
+async def sendwel(up,l=None):
+ l=l or await langof(up.effective_user.id); p=STATIC/"bingo.PNG"
+ if p.exists():await up.effective_message.reply_photo(str(p),caption=wel(l),reply_markup=kb(l))
+ else:await up.effective_message.reply_text(wel(l),reply_markup=kb(l))
+async def start(up,ctx):
+ u=up.effective_user; await reg(u.id,u.username,u.first_name,"am" if (u.language_code or "").startswith("am") else "en")
+ if ctx.args and ctx.args[0].startswith("ref_"):
+  try:
+   r=int(ctx.args[0][4:])
+   if r!=u.id:
+    async with engine.begin() as c:await c.execute(text("INSERT INTO bingo_referrals(referrer_telegram_id,referred_telegram_id) VALUES(:r,:u) ON CONFLICT(referred_telegram_id) DO NOTHING"),{"r":r,"u":u.id})
+  except ValueError:pass
+ await sendwel(up)
+async def bottext(up,ctx):
+ u=up.effective_user;m=up.effective_message;s=(m.text or "").strip();await reg(u.id,u.username,u.first_name);l=await langof(u.id)
+ if ctx.user_data.get("rename"):
+  async with engine.begin() as c:await c.execute(text("UPDATE bingo_users SET display_name=:n WHERE telegram_id=:i"),{"n":s[:100],"i":u.id})
+  ctx.user_data["rename"]=False;await m.reply_text("✅ Name updated.",reply_markup=kb(l));return
+ M={"🎮 Play Now":"play","🎮 አሁን ይጫወቱ":"play","💰 Check Balance":"balance","💰 ቀሪ ሂሳብ":"balance","➕ Make Deposit":"deposit","➕ ገንዘብ ያስገቡ":"deposit","🆘 Support":"support","🆘 ድጋፍ":"support","📖 Instructions":"help","📖 መመሪያ":"help","🏆 Win Patterns":"patterns","🏆 የማሸነፊያ ቅጦች":"patterns","✏️ Change Username":"rename","✏️ ስም ይቀይሩ":"rename","👥 Invite Friends":"invite","👥 ጓደኞችን ይጋብዙ":"invite","🥇 Leaderboard":"leaders","🥇 ደረጃ ሰንጠረዥ":"leaders","📜 Transaction History":"history","📜 የግብይት ታሪክ":"history","🌐 Change Language":"language","🌐 ቋንቋ ይቀይሩ":"language"}
+ a=M.get(s)
+ if a=="play":await m.reply_text("🎮 Open Mini App",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Open Cartela Bingo",web_app=WebAppInfo(url=WEB))]]))
+ elif a=="balance":
+  async with engine.connect() as c:b=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i"),{"i":u.id})).scalar_one_or_none() or 0
+  await m.reply_text(f"💰 {b} Birr",reply_markup=kb(l))
+ elif a=="deposit":await m.reply_text("Create a request in Wallet. Balance is credited only after a trusted payment record matches.",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💳 Open Wallet",web_app=WebAppInfo(url=WEB+"?tab=wallet"))]]))
+ elif a=="support":await m.reply_text(SUPPORT or "Support contact not configured.",reply_markup=kb(l))
+ elif a=="help":await m.reply_text("Choose a cartela, join the lobby, watch numbers marked automatically, then press BINGO. The server verifies the claim.",reply_markup=kb(l))
+ elif a=="patterns":await m.reply_text("🏆 Horizontal, vertical, or diagonal line. Center is free.",reply_markup=kb(l))
+ elif a=="rename":ctx.user_data["rename"]=True;await m.reply_text("Send your display name.")
+ elif a=="invite":
+  me=await ctx.bot.get_me();await m.reply_text(f"👥 Your personal invite link:\nhttps://t.me/{me.username}?start=ref_{u.id}",reply_markup=kb(l))
+ elif a=="language":await setlang(u.id,"am" if l=="en" else "en");await sendwel(up,"am" if l=="en" else "en")
+ elif a in ("leaders","history"):
+  async with engine.connect() as c:
+   if a=="leaders":r=await c.execute(text("SELECT COALESCE(u.display_name,'Player'),COUNT(*) FROM bingo_games g JOIN bingo_users u ON u.telegram_id=g.winner_telegram_id GROUP BY u.display_name ORDER BY COUNT(*) DESC LIMIT 10"));rows=r.fetchall();out="🏆 Leaderboard\n"+("\n".join(f"{i+1}. {x[0]} — {x[1]}" for i,x in enumerate(rows)) if rows else "No winners yet.")
+   else:r=await c.execute(text("SELECT transaction_type,amount,status FROM bingo_transactions WHERE telegram_id=:i ORDER BY id DESC LIMIT 10"),{"i":u.id});rows=r.fetchall();out="📜 Transactions\n"+("\n".join(f"{x[0]} · {x[1]} · {x[2]}" for x in rows) if rows else "No transactions yet.")
+  await m.reply_text(out,reply_markup=kb(l))
+def auth(init):
+ if not BOT or not init:raise HTTPException(401,"Open Mini App inside Telegram.")
+ try:
+  d=dict(urllib.parse.parse_qsl(init,keep_blank_values=True));h=d.pop("hash");check="\n".join(f"{k}={v}" for k,v in sorted(d.items()));secret=hmac.new(b"WebAppData",BOT.encode(),hashlib.sha256).digest()
+  if not hmac.compare_digest(hmac.new(secret,check.encode(),hashlib.sha256).hexdigest(),h) or abs(time.time()-int(d.get("auth_date","0")))>86400:raise ValueError()
+  return json.loads(d["user"])
+ except Exception:raise HTTPException(401,"Telegram authentication failed. Reopen the app.")
+async def who(req):
+ u=auth(req.headers.get("X-Telegram-Init-Data",""));await reg(int(u["id"]),u.get("username"),u.get("first_name"));return u
+def newcard():
+ cols=[random.sample(range(a,b+1),5) for a,b in [(1,15),(16,30),(31,45),(46,60),(61,75)]];g=[[cols[c][r] for c in range(5)] for r in range(5)];g[2][2]=0;return g
+def winline(card,called):
+ m=set(called)|{0};lines=[[(r,c) for c in range(5)] for r in range(5)]+[[(r,c) for r in range(5)] for c in range(5)]+[[(i,i) for i in range(5)],[(i,4-i) for i in range(5)]]
+ return next(([[r,c] for r,c in ln] for ln in lines if all(card[r][c] in m for r,c in ln)),None)
+async def loop():
+ while True:
+  await asyncio.sleep(1)
+  async with lock:
+   if g["status"]=="waiting" and g["players"]:
+    g["seconds"]-=1
+    if g["seconds"]<=0:
+     g["status"]="running";g["seq"]=random.sample(range(1,76),75);g["last"]=time.time()
+     async with engine.begin() as c:await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i"),{"i":g["id"]})
+   elif g["status"]=="running" and time.time()-g["last"]>=5:
+    if g["seq"]:
+     g["called"].append(g["seq"].pop(0));g["last"]=time.time()
+     async with engine.begin() as c:await c.execute(text("UPDATE bingo_games SET called_numbers=CAST(:n AS jsonb) WHERE id=:i"),{"n":json.dumps(g["called"]),"i":g["id"]})
+    else:g["status"]="finished"
+   elif g["status"]=="finished":
+    async with engine.begin() as c:gid=(await c.execute(text("INSERT INTO bingo_games(status) VALUES('waiting') RETURNING id"))).scalar_one()
+    g.update(id=gid,status="waiting",seconds=30,called=[],players={},winner=None,seq=[],last=0)
 @asynccontextmanager
 async def lifespan(app):
-    global telegram_app
-
-    await setup_database()
-
-    if TELEGRAM_BOT_TOKEN:
-        telegram_app = (
-            Application.builder()
-            .token(TELEGRAM_BOT_TOKEN)
-            .build()
-        )
-
-        telegram_app.add_handler(
-            CommandHandler("start", start_command)
-        )
-
-        telegram_app.add_handler(
-            MessageHandler(
-                filters.TEXT & ~filters.COMMAND,
-                menu_handler,
-            )
-        )
-
-        await telegram_app.initialize()
-        await telegram_app.start()
-
-        if telegram_app.updater is not None:
-            await telegram_app.updater.start_polling(
-                drop_pending_updates=False
-            )
-
-        logger.info("Telegram bot started.")
-    else:
-        logger.warning("TELEGRAM_BOT_TOKEN is missing.")
-
-    yield
-
-    if telegram_app is not None:
-        if telegram_app.updater is not None:
-            await telegram_app.updater.stop()
-
-        await telegram_app.stop()
-        await telegram_app.shutdown()
-
-    if engine is not None:
-        await engine.dispose()
-
-
-# =========================================================
-# FASTAPI APPLICATION
-# =========================================================
-
-app = FastAPI(
-    title="Cartela Bingo",
-    description="Telegram Bingo bot and Mini App",
-    lifespan=lifespan,
-)
-
-app.mount(
-    "/static",
-    StaticFiles(directory=str(STATIC_DIR)),
-    name="static",
-)
-
-
-@app.get("/", response_class=HTMLResponse)
-async def home():
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>Cartela Bingo</title>
-      <style>
-        body {
-          margin: 0;
-          min-height: 100vh;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: linear-gradient(135deg, #101923, #25204e);
-          color: white;
-          font-family: Arial, sans-serif;
-          text-align: center;
-        }
-        main { padding: 24px; max-width: 480px; }
-        img { width: 100%; max-width: 320px; border-radius: 16px; }
-      </style>
-    </head>
-    <body>
-      <main>
-        <img src="/static/bingo.PNG" alt="Cartela Bingo logo">
-        <h1>🎉 Welcome to Cartela Bingo!</h1>
-        <p>Open your Telegram bot to access the Bingo dashboard.</p>
-      </main>
-    </body>
-    </html>
-    """
-
-
-@app.get("/app", response_class=HTMLResponse)
-async def mini_app():
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport"
-            content="width=device-width, initial-scale=1, maximum-scale=1">
-      <script src="https://telegram.org/js/telegram-web-app.js"></script>
-      <title>Cartela Bingo</title>
-      <style>
-        * { box-sizing: border-box; }
-        body {
-          margin: 0;
-          padding: 20px;
-          background: #101923;
-          color: #ffffff;
-          font-family: Arial, sans-serif;
-          text-align: center;
-        }
-        .logo {
-          display: block;
-          width: 100%;
-          max-width: 340px;
-          max-height: 220px;
-          object-fit: contain;
-          margin: 0 auto 20px;
-          border-radius: 16px;
-        }
-        h1 { font-size: 26px; }
-        p { color: #cbd5e1; line-height: 1.6; }
-        .menu {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 12px;
-          margin-top: 24px;
-        }
-        button {
-          width: 100%;
-          min-height: 56px;
-          padding: 14px 8px;
-          border: 1px solid #35475a;
-          border-radius: 12px;
-          background: #223244;
-          color: white;
-          font-size: 15px;
-          font-weight: 600;
-        }
-        button.primary {
-          grid-column: 1 / -1;
-          background: #7c3aed;
-          border: none;
-        }
-        .note { font-size: 12px; margin-top: 24px; }
-      </style>
-    </head>
-    <body>
-      <img class="logo" src="/static/bingo.PNG" alt="Cartela Bingo logo">
-      <h1>🎉 Cartela Bingo</h1>
-      <p>🎱 Welcome! Choose an option below.</p>
-
-      <div class="menu">
-        <button class="primary" onclick="showNotice()">
-          🎮 Enter Bingo Lobby
-        </button>
-        <button onclick="showNotice()">
-          💰 Check Balance
-        </button>
-        <button onclick="showNotice()">
-          🏆 Win Patterns
-        </button>
-        <button onclick="showNotice()">
-          👥 Invite Friends
-        </button>
-        <button onclick="showNotice()">
-          📖 Instructions
-        </button>
-      </div>
-
-      <p class="note">
-        The live game, wallet and payment features still need to be connected.
-      </p>
-
-      <script>
-        const tg = window.Telegram && window.Telegram.WebApp;
-
-        if (tg) {
-          tg.ready();
-          tg.expand();
-        }
-
-        function showNotice() {
-          const message =
-            "This feature is not connected yet. The game backend " +
-            "must be implemented before you can play.";
-          if (tg && tg.showAlert) {
-            tg.showAlert(message);
-          } else {
-            alert(message);
-          }
-        }
-      </script>
-    </body>
-    </html>
-    """
-
-
+ global bot,ticker
+ await dbinit();ticker=asyncio.create_task(loop())
+ if BOT:
+  bot=Application.builder().token(BOT).build();bot.add_handler(CommandHandler("start",start));bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,bottext));await bot.initialize();await bot.start()
+  if bot.updater:await bot.updater.start_polling(drop_pending_updates=False)
+ yield
+ if ticker:ticker.cancel()
+ if bot:
+  if bot.updater:await bot.updater.stop()
+  await bot.stop();await bot.shutdown()
+ if engine:await engine.dispose()
+app=FastAPI(title="Cartela Bingo",lifespan=lifespan);app.mount("/static",StaticFiles(directory=str(STATIC)),name="static")
+@app.get("/")
+async def root():return {"app":"Cartela Bingo","mini_app":"/app","health":"/health"}
+@app.get("/app",response_class=HTMLResponse)
+async def mini():return HTMLResponse((STATIC/"index.html").read_text(encoding="utf-8"))
 @app.get("/health")
-async def health():
-    return {"status": "ok"}
-
-
+async def health():return {"status":"ok"}
 @app.get("/health/database")
-async def database_health():
-    if engine is None:
-        return {"status": "disconnected"}
-
-    try:
-        async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
-
-        return {"status": "connected"}
-
-    except Exception:
-        logger.exception("Database health check failed.")
-        return {"status": "disconnected"}
+async def healthdb():
+ async with engine.connect() as c:await c.execute(text("SELECT 1"))
+ return {"status":"connected"}
+@app.get("/api/me")
+async def me(req:Request):
+ u=await who(req);i=int(u["id"])
+ async with engine.connect() as c:
+  row=(await c.execute(text("SELECT display_name,language FROM bingo_users WHERE telegram_id=:i"),{"i":i})).first();bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i"),{"i":i})).scalar_one_or_none() or 0;refs=(await c.execute(text("SELECT COUNT(*) FROM bingo_referrals WHERE referrer_telegram_id=:i"),{"i":i})).scalar_one()
+ uname=(await bot.bot.get_me()).username if bot else "YOUR_BOT_USERNAME"
+ return {"id":i,"name":(row[0] if row else None) or u.get("first_name","Player"),"username":u.get("username"),"language":row[1] if row else "en","balance":float(bal),"referrals":refs,"referral_link":f"https://t.me/{uname}?start=ref_{i}"}
+@app.post("/api/language")
+async def language(req:Request):
+ u=await who(req);l=(await req.json()).get("language")
+ if l not in ("en","am"):raise HTTPException(400,"Invalid language")
+ await setlang(int(u["id"]),l);return {"ok":True}
+@app.get("/api/game")
+async def getgame(req:Request):
+ u=await who(req)
+ async with lock:
+  p=g["players"].get(int(u["id"]));return {"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"players":[{"telegram_id":i,"name":x["name"],"cartela_number":x["n"]} for i,x in g["players"].items()],"player_count":len(g["players"]),"my_cartela":p["card"] if p else None,"my_cartela_number":p["n"] if p else None,"winner":g["winner"]}
+class Join(BaseModel):
+ cartela_number:int=Field(ge=1,le=200);stake:Decimal=Field(default=Decimal("0"),ge=0,le=Decimal("1000"))
+@app.post("/api/game/join")
+async def join(b:Join,req:Request):
+ u=await who(req);i=int(u["id"])
+ async with lock:
+  if g["status"]!="waiting":raise HTTPException(409,"Lobby closed; wait for next game.")
+  if i in g["players"]:return {"ok":True}
+  if any(p["n"]==b.cartela_number for p in g["players"].values()):raise HTTPException(409,"Cartela already taken.")
+  if b.stake:
+   async with engine.begin() as c:
+    bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i FOR UPDATE"),{"i":i})).scalar_one()
+    if Decimal(str(bal))<b.stake:raise HTTPException(402,"Insufficient balance.")
+    await c.execute(text("UPDATE bingo_wallets SET balance=balance-:a WHERE telegram_id=:i"),{"a":b.stake,"i":i})
+    await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:i,'bet',:a,'verified','Bingo stake')"),{"i":i,"a":-b.stake})
+  card=newcard();g["players"][i]={"name":u.get("first_name","Player"),"n":b.cartela_number,"card":card,"stake":float(b.stake)}
+  async with engine.begin() as c:await c.execute(text("INSERT INTO bingo_game_players(game_id,telegram_id,cartela_number,cartela,stake) VALUES(:g,:i,:n,CAST(:c AS jsonb),:s)"),{"g":g["id"],"i":i,"n":b.cartela_number,"c":json.dumps(card),"s":b.stake})
+  return {"ok":True,"cartela":card,"cartela_number":b.cartela_number}
+@app.post("/api/game/claim")
+async def claim(req:Request):
+ u=await who(req);i=int(u["id"])
+ async with lock:
+  if g["status"]!="running":raise HTTPException(409,"Game is not running.")
+  p=g["players"].get(i)
+  if not p:raise HTTPException(400,"Join first.")
+  line=winline(p["card"],g["called"])
+  if not line:raise HTTPException(400,"No valid line yet.")
+  if g["winner"]:raise HTTPException(409,"Another player already won.")
+  g["winner"]={"telegram_id":i,"name":p["name"],"cartela_number":p["n"],"pattern":line};g["status"]="finished";prize=sum(Decimal(str(x["stake"])) for x in g["players"].values())
+  async with engine.begin() as c:
+   await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),winner_telegram_id=:u,called_numbers=CAST(:n AS jsonb) WHERE id=:g"),{"u":i,"n":json.dumps(g["called"]),"g":g["id"]})
+   if prize:
+    await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a WHERE telegram_id=:u"),{"a":prize,"u":i})
+    await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:u,'win',:a,'verified','Bingo prize')"),{"u":i,"a":prize})
+  return {"ok":True,"pattern":line,"prize":float(prize)}
+@app.get("/api/wallet")
+async def wallet(req:Request):
+ u=await who(req);i=int(u["id"])
+ async with engine.connect() as c:
+  bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i"),{"i":i})).scalar_one_or_none() or 0
+  ds=(await c.execute(text("SELECT id,provider,amount,reference,status,created_at FROM deposit_requests WHERE telegram_id=:i ORDER BY id DESC LIMIT 20"),{"i":i})).fetchall()
+  ts=(await c.execute(text("SELECT transaction_type,amount,status,description,created_at FROM bingo_transactions WHERE telegram_id=:i ORDER BY id DESC LIMIT 20"),{"i":i})).fetchall()
+ return {"balance":float(bal),"deposits":[{"id":x[0],"provider":x[1],"amount":float(x[2]),"reference":x[3],"status":x[4],"created_at":x[5].isoformat()} for x in ds],"transactions":[{"type":x[0],"amount":float(x[1]),"status":x[2],"description":x[3],"created_at":x[4].isoformat()} for x in ts]}
+class Dep(BaseModel):
+ provider:str;amount:Decimal=Field(gt=0,le=Decimal("1000000"));reference:str=Field(min_length=3,max_length=200)
+@app.post("/api/deposits")
+async def deposit(b:Dep,req:Request):
+ u=await who(req);p=b.provider.lower()
+ if p not in PROVIDERS:raise HTTPException(400,"Unknown provider.")
+ async with engine.begin() as c:r=await c.execute(text("INSERT INTO deposit_requests(telegram_id,provider,amount,reference) VALUES(:i,:p,:a,:r) RETURNING id"),{"i":int(u["id"]),"p":p,"a":b.amount,"r":b.reference})
+ return {"ok":True,"id":r.scalar_one(),"status":"pending"}
+class Payment(BaseModel):
+ provider:str;external_reference:str=Field(min_length=2,max_length=200);amount:Decimal=Field(gt=0);payer_reference:Optional[str]=None;memo:Optional[str]=None
+@app.post("/api/payments/records")
+async def payment(b:Payment,x_payment_api_key:str=Header(default="")):
+ if not PAYKEY or not secrets.compare_digest(x_payment_api_key,PAYKEY):raise HTTPException(401,"Invalid payment integration key.")
+ p=b.provider.lower()
+ if p not in PROVIDERS:raise HTTPException(400,"Unknown provider.")
+ async with engine.begin() as c:
+  await c.execute(text("INSERT INTO payment_records(provider,external_reference,amount,payer_reference,memo) VALUES(:p,:r,:a,:pr,:m) ON CONFLICT(external_reference) DO NOTHING"),{"p":p,"r":b.external_reference,"a":b.amount,"pr":b.payer_reference,"m":b.memo})
+  x=(await c.execute(text("SELECT id,telegram_id,amount,reference FROM deposit_requests WHERE provider=:p AND status='pending' AND amount=:a AND (reference=:r OR reference=:pr OR POSITION(reference IN COALESCE(:m,''))>0) ORDER BY id LIMIT 1 FOR UPDATE"),{"p":p,"a":b.amount,"r":b.external_reference,"pr":b.payer_reference,"m":b.memo or ""})).first()
+  if x:
+   await c.execute(text("UPDATE deposit_requests SET status='verified',verified_at=NOW() WHERE id=:i"),{"i":x[0]});await c.execute(text("UPDATE payment_records SET matched_request_id=:i WHERE external_reference=:r"),{"i":x[0],"r":b.external_reference});await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a WHERE telegram_id=:u"),{"a":x[2],"u":x[1]});await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'deposit',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING"),{"u":x[1],"a":x[2],"d":f"Verified {p} deposit #{x[0]}","r":b.external_reference});return {"ok":True,"matched":True,"request_id":x[0]}
+ return {"ok":True,"matched":False,"message":"Stored but no exact pending request matched."}
+@app.get("/api/leaderboard")
+async def leaderboard(req:Request):
+ await who(req)
+ async with engine.connect() as c:r=await c.execute(text("SELECT COALESCE(u.display_name,'Player'),COUNT(*) FROM bingo_games g JOIN bingo_users u ON u.telegram_id=g.winner_telegram_id GROUP BY u.display_name ORDER BY COUNT(*) DESC LIMIT 50"));rows=r.fetchall()
+ return {"players":[{"name":x[0],"wins":x[1]} for x in rows]}
+@app.websocket("/ws/game")
+async def ws(ws:WebSocket):
+ await ws.accept()
+ try:
+  while True:
+   async with lock:d={"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"player_count":len(g["players"]),"winner":g["winner"]}
+   await ws.send_json(d);await asyncio.sleep(1)
+ except (WebSocketDisconnect,RuntimeError):pass
