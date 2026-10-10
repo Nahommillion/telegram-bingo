@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine
+
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -22,13 +23,15 @@ logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+SUPPORT_URL = os.getenv("SUPPORT_URL", "")
+WEB_APP_URL = os.getenv("WEB_APP_URL", "")
 
 engine = None
 telegram_app = None
 
-
 MENUS = {
     "en": [
+        ["🚀 Start"],
         ["🎱 Play Now", "💰 Check Balance"],
         ["➕ Make Deposit", "📜 Transaction History"],
         ["🏆 Leaderboard", "🎯 Win Patterns"],
@@ -36,6 +39,7 @@ MENUS = {
         ["🆘 Support", "🌐 English / አማርኛ"],
     ],
     "am": [
+        ["🚀 ጀምር"],
         ["🎱 አሁን ይጫወቱ", "💰 ቀሪ ሂሳብ"],
         ["➕ ተቀማጭ ያድርጉ", "📜 የግብይት ታሪክ"],
         ["🏆 የደረጃ ሰንጠረዥ", "🎯 የማሸነፊያ ቅጦች"],
@@ -44,61 +48,94 @@ MENUS = {
     ],
 }
 
+ACTIONS = {
+    "🎱 Play Now": "play",
+    "🎱 አሁን ይጫወቱ": "play",
+    "💰 Check Balance": "balance",
+    "💰 ቀሪ ሂሳብ": "balance",
+    "➕ Make Deposit": "deposit",
+    "➕ ተቀማጭ ያድርጉ": "deposit",
+    "📜 Transaction History": "history",
+    "📜 የግብይት ታሪክ": "history",
+    "🏆 Leaderboard": "leaderboard",
+    "🏆 የደረጃ ሰንጠረዥ": "leaderboard",
+    "🎯 Win Patterns": "patterns",
+    "🎯 የማሸነፊያ ቅጦች": "patterns",
+    "👥 Invite Friends": "invite",
+    "👥 ጓደኞችን ይጋብዙ": "invite",
+    "👤 Change Username": "username",
+    "👤 ስም ይቀይሩ": "username",
+    "🆘 Support": "support",
+    "🆘 ድጋፍ": "support",
+}
 
-async def save_user(update: Update, language: str):
-    if engine is None or update.effective_user is None:
+
+async def db_execute(query, params=None, fetch=False):
+    if engine is None:
+        return [] if fetch else None
+
+    async with engine.begin() as conn:
+        result = await conn.execute(text(query), params or {})
+        if fetch:
+            return [dict(row) for row in result.mappings().all()]
+        return result
+
+
+async def ensure_user(update: Update):
+    user = update.effective_user
+    if user is None or engine is None:
         return
 
-    user = update.effective_user
+    await db_execute(
+        """
+        INSERT INTO bingo_users (telegram_id, username)
+        VALUES (:telegram_id, :username)
+        ON CONFLICT (telegram_id)
+        DO UPDATE SET username = EXCLUDED.username
+        """,
+        {
+            "telegram_id": user.id,
+            "username": user.username or user.full_name,
+        },
+    )
 
-    try:
-        async with engine.begin() as connection:
-            await connection.execute(
-                text("""
-                    INSERT INTO bingo_users
-                        (telegram_id, username, language)
-                    VALUES
-                        (:telegram_id, :username, :language)
-                    ON CONFLICT (telegram_id)
-                    DO UPDATE SET
-                        username = EXCLUDED.username,
-                        language = EXCLUDED.language
-                """),
-                {
-                    "telegram_id": user.id,
-                    "username": user.username or user.full_name,
-                    "language": language,
-                },
-            )
-    except SQLAlchemyError:
-        logger.exception("Could not save Telegram user")
+    await db_execute(
+        """
+        INSERT INTO bingo_wallets (telegram_id, balance)
+        VALUES (:telegram_id, 0)
+        ON CONFLICT (telegram_id) DO NOTHING
+        """,
+        {"telegram_id": user.id},
+    )
 
 
-async def get_language(update: Update) -> str:
+async def get_language(update: Update):
     if engine is None or update.effective_user is None:
         return "en"
 
-    try:
-        async with engine.connect() as connection:
-            result = await connection.execute(
-                text("""
-                    SELECT language FROM bingo_users
-                    WHERE telegram_id = :telegram_id
-                """),
-                {"telegram_id": update.effective_user.id},
-            )
-            language = result.scalar_one_or_none()
-            return language if language in ("en", "am") else "en"
-    except SQLAlchemyError:
-        logger.exception("Could not read user language")
-        return "en"
+    rows = await db_execute(
+        "SELECT language FROM bingo_users WHERE telegram_id=:uid",
+        {"uid": update.effective_user.id},
+        fetch=True,
+    )
+    if rows and rows[0]["language"] in ("en", "am"):
+        return rows[0]["language"]
+    return "en"
 
 
-async def show_menu(update: Update, language: str, welcome: bool = False):
+async def set_language(update: Update, language: str):
+    if engine is not None and update.effective_user:
+        await db_execute(
+            "UPDATE bingo_users SET language=:lang WHERE telegram_id=:uid",
+            {"lang": language, "uid": update.effective_user.id},
+        )
+
+
+async def show_menu(update: Update, language="en"):
     if update.effective_message is None:
         return
 
-    await save_user(update, language)
+    await ensure_user(update)
 
     if language == "am":
         message = (
@@ -111,22 +148,39 @@ async def show_menu(update: Update, language: str, welcome: bool = False):
             "Choose an option from the menu below."
         )
 
-    keyboard = ReplyKeyboardMarkup(
-        MENUS[language],
-        resize_keyboard=True,
-        is_persistent=True,
-    )
-
     await update.effective_message.reply_text(
         message,
-        reply_markup=keyboard,
+        reply_markup=ReplyKeyboardMarkup(
+            MENUS[language],
+            resize_keyboard=True,
+            is_persistent=True,
+        ),
     )
 
 
-async def start_command(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-):
-    await show_menu(update, "en", welcome=True)
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await ensure_user(update)
+    language = await get_language(update)
+
+    # Store referral code if supplied: /start ref_123456
+    if context.args and context.args[0].startswith("ref_"):
+        try:
+            referrer_id = int(context.args[0][4:])
+            player_id = update.effective_user.id
+
+            if referrer_id != player_id:
+                await db_execute(
+                    """
+                    INSERT INTO bingo_referrals (player_id, referrer_id)
+                    VALUES (:player, :referrer)
+                    ON CONFLICT (player_id) DO NOTHING
+                    """,
+                    {"player": player_id, "referrer": referrer_id},
+                )
+        except (ValueError, TypeError):
+            pass
+
+    await show_menu(update, language)
 
 
 async def menu_handler(
@@ -135,107 +189,179 @@ async def menu_handler(
     if update.effective_message is None:
         return
 
-    choice = update.effective_message.text or ""
+    choice = (update.effective_message.text or "").strip()
+    user = update.effective_user
+
+    await ensure_user(update)
     language = await get_language(update)
+
+    if choice in ("🚀 Start", "🚀 ጀምር"):
+        await show_menu(update, language)
+        return
 
     if choice == "🌐 English / አማርኛ":
         language = "am" if language == "en" else "en"
+        await set_language(update, language)
         await show_menu(update, language)
         return
 
-    english_actions = {
-        "🎱 Play Now": "play",
-        "💰 Check Balance": "balance",
-        "➕ Make Deposit": "deposit",
-        "📜 Transaction History": "history",
-        "🏆 Leaderboard": "leaderboard",
-        "🎯 Win Patterns": "patterns",
-        "👥 Invite Friends": "invite",
-        "👤 Change Username": "username",
-        "🆘 Support": "support",
-    }
-
-    amharic_actions = {
-        "🎱 አሁን ይጫወቱ": "play",
-        "💰 ቀሪ ሂሳብ": "balance",
-        "➕ ተቀማጭ ያድርጉ": "deposit",
-        "📜 የግብይት ታሪክ": "history",
-        "🏆 የደረጃ ሰንጠረዥ": "leaderboard",
-        "🎯 የማሸነፊያ ቅጦች": "patterns",
-        "👥 ጓደኞችን ይጋብዙ": "invite",
-        "👤 ስም ይቀይሩ": "username",
-        "🆘 ድጋፍ": "support",
-    }
-
-    action = {**english_actions, **amharic_actions}.get(choice)
+    action = ACTIONS.get(choice)
 
     if action is None:
-        await show_menu(update, language)
+        if language == "am":
+            await update.effective_message.reply_text(
+                "ከምናሌው ውስጥ አንዱን አማራጭ ይምረጡ።"
+            )
+        else:
+            await update.effective_message.reply_text(
+                "Please choose an option from the menu."
+            )
         return
 
-    if action == "play":
-        message = (
-            "🎱 The Bingo game lobby is coming soon."
-            if language == "en"
-            else "🎱 የቢንጎ ጨዋታ ሎቢ በቅርቡ ይዘጋጃል።"
+    if action == "balance":
+        rows = await db_execute(
+            """
+            SELECT balance FROM bingo_wallets
+            WHERE telegram_id=:uid
+            """,
+            {"uid": user.id},
+            fetch=True,
         )
-    elif action == "balance":
-        message = (
-            "💰 Your wallet is not configured yet."
-            if language == "en"
-            else "💰 የኪስ ቦርሳዎ ገና አልተዘጋጀም።"
+        balance = float(rows[0]["balance"]) if rows else 0.0
+        if language == "am":
+            message = f"💰 ቀሪ ሂሳብዎ፦ {balance:.2f} ብር"
+        else:
+            message = f"💰 Your balance: {balance:.2f} Birr"
+
+    elif action == "history":
+        rows = await db_execute(
+            """
+            SELECT transaction_type, amount, status, created_at
+            FROM bingo_transactions
+            WHERE telegram_id=:uid
+            ORDER BY id DESC LIMIT 10
+            """,
+            {"uid": user.id},
+            fetch=True,
         )
+        if not rows:
+            message = (
+                "📜 ገና ምንም ግብይት የለም።"
+                if language == "am"
+                else "📜 You have no transactions yet."
+            )
+        else:
+            lines = ["📜 የግብይት ታሪክ፦" if language == "am"
+                     else "📜 Recent transactions:"]
+            for row in rows:
+                amount = float(row["amount"])
+                lines.append(
+                    f"• {row['transaction_type']}: {amount:.2f} Birr "
+                    f"({row['status']})"
+                )
+            message = "\n".join(lines)
+
     elif action == "deposit":
         message = (
-            "➕ Deposit options will be added after payment verification is configured."
-            if language == "en"
-            else "➕ የተቀማጭ አማራጮች የክፍያ ማረጋገጫ ከተዘጋጀ በኋላ ይጨመራሉ።"
+            "➕ የተቀማጭ አማራጮች፦ Telebirr፣ CBE Birr፣ eBirr፣ CBE Bank።\n"
+            "የክፍያ ማረጋገጫ እስኪዘጋጅ ድረስ ክፍያ አይላኩ።"
+            if language == "am"
+            else
+            "➕ Payment methods planned: Telebirr, CBE Birr, eBirr, and CBE Bank.\n"
+            "Deposits are not enabled yet. Do not send money until payment verification is configured."
         )
-    elif action == "history":
-        message = (
-            "📜 Transaction history will be available when the wallet is implemented."
-            if language == "en"
-            else "📜 የግብይት ታሪክ የኪስ ቦርሳው ሲዘጋጅ ይገኛል።"
-        )
+
+    elif action == "play":
+        if WEB_APP_URL:
+            message = (
+                "🎱 Open the Bingo game:\n" + WEB_APP_URL
+                if language == "en"
+                else "🎱 የቢንጎ ጨዋታውን ይክፈቱ፦\n" + WEB_APP_URL
+            )
+        else:
+            message = (
+                "🎱 የጨዋታው ገጽ ገና አልተዘጋጀም።"
+                if language == "am"
+                else "🎱 The game page is not configured yet."
+            )
+
     elif action == "leaderboard":
         message = (
-            "🏆 The leaderboard will appear when scoring is implemented."
-            if language == "en"
-            else "🏆 የደረጃ ሰንጠረዡ የነጥብ ስርዓቱ ሲዘጋጅ ይታያል።"
+            "🏆 የደረጃ ሰንጠረዡ የነጥብ ስርዓቱ ሲዘጋጅ ይታያል።"
+            if language == "am"
+            else "🏆 The leaderboard will be available when scoring is implemented."
         )
+
     elif action == "patterns":
         message = (
-            "🎯 Winning patterns will be added soon."
-            if language == "en"
-            else "🎯 የማሸነፊያ ቅጦች በቅርቡ ይጨመራሉ።"
+            "🎯 የማሸነፊያ ቅጦች በቅርቡ ይጨመራሉ።"
+            if language == "am"
+            else "🎯 Winning pattern examples will be added to the game screen."
         )
+
     elif action == "invite":
         bot_username = context.bot.username
         message = (
-            f"👥 Invite friends using this link:\n"
-            f"https://t.me/{bot_username}?start=ref_{update.effective_user.id}"
-        )
-    elif action == "username":
-        message = (
-            "👤 Username changes will be added soon."
-            if language == "en"
-            else "👤 የተጠቃሚ ስም መቀየር በቅርቡ ይጨመራል።"
-        )
-    else:
-        message = (
-            "🆘 Support details will be added soon."
-            if language == "en"
-            else "🆘 የድጋፍ መረጃ በቅርቡ ይጨመራል።"
+            f"👥 Invite friends using your personal link:\n"
+            f"https://t.me/{bot_username}?start=ref_{user.id}"
         )
 
+    elif action == "username":
+        context.user_data["awaiting_username"] = True
+        message = (
+            "👤 አዲስ የሚታይ ስምዎን ይላኩ።"
+            if language == "am"
+            else "👤 Send the display name you want to use."
+        )
+
+    elif action == "support":
+        message = (
+            f"🆘 Support:\n{SUPPORT_URL}"
+            if SUPPORT_URL
+            else (
+                "🆘 የድጋፍ አገናኝ ገና አልተዘጋጀም።"
+                if language == "am"
+                else "🆘 Support contact has not been configured yet."
+            )
+        )
+
+    else:
+        message = "Please try again."
+
     await update.effective_message.reply_text(message)
+
+
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_message is None:
+        return
+
+    if context.user_data.get("awaiting_username"):
+        new_name = (update.effective_message.text or "").strip()
+        if not new_name or len(new_name) > 100:
+            await update.effective_message.reply_text(
+                "Please enter a name between 1 and 100 characters."
+            )
+            return
+
+        await ensure_user(update)
+        await db_execute(
+            "UPDATE bingo_users SET username=:name WHERE telegram_id=:uid",
+            {"name": new_name, "uid": update.effective_user.id},
+        )
+        context.user_data["awaiting_username"] = False
+        await update.effective_message.reply_text(
+            f"✅ Display name updated to: {new_name}"
+        )
+        return
+
+    await menu_handler(update, context)
 
 
 def configure_telegram_bot():
     bot = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     bot.add_handler(CommandHandler("start", start_command))
     bot.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler)
+        MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler)
     )
     return bot
 
@@ -245,54 +371,69 @@ async def lifespan(app: FastAPI):
     global engine, telegram_app
 
     if DATABASE_URL:
-        database_url = DATABASE_URL
+        url = DATABASE_URL
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgresql://"):
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-        if database_url.startswith("postgres://"):
-            database_url = database_url.replace(
-                "postgres://", "postgresql+asyncpg://", 1
-            )
-        elif database_url.startswith("postgresql://"):
-            database_url = database_url.replace(
-                "postgresql://", "postgresql+asyncpg://", 1
-            )
-
-        engine = create_async_engine(
-            database_url,
-            pool_pre_ping=True,
-        )
+        engine = create_async_engine(url, pool_pre_ping=True)
 
         try:
-            async with engine.begin() as connection:
-                await connection.execute(text("""
+            async with engine.begin() as conn:
+                await conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS bingo_users (
                         id BIGSERIAL PRIMARY KEY,
-                        telegram_id BIGINT UNIQUE,
+                        telegram_id BIGINT UNIQUE NOT NULL,
                         username VARCHAR(100),
                         language VARCHAR(10) NOT NULL DEFAULT 'en',
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
                 """))
-            logger.info("PostgreSQL connected.")
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS bingo_wallets (
+                        telegram_id BIGINT PRIMARY KEY REFERENCES bingo_users(telegram_id),
+                        balance NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (balance >= 0),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """))
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS bingo_transactions (
+                        id BIGSERIAL PRIMARY KEY,
+                        telegram_id BIGINT NOT NULL REFERENCES bingo_users(telegram_id),
+                        transaction_type VARCHAR(30) NOT NULL,
+                        amount NUMERIC(14,2) NOT NULL,
+                        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """))
+                await conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS bingo_referrals (
+                        id BIGSERIAL PRIMARY KEY,
+                        player_id BIGINT UNIQUE NOT NULL REFERENCES bingo_users(telegram_id),
+                        referrer_id BIGINT NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """))
+            logger.info("PostgreSQL connected and tables initialized.")
         except SQLAlchemyError:
-            logger.exception("PostgreSQL connection failed.")
+            logger.exception("PostgreSQL initialization failed.")
             await engine.dispose()
             engine = None
+    else:
+        logger.error("DATABASE_URL is missing.")
 
     if TELEGRAM_BOT_TOKEN:
         try:
             telegram_app = configure_telegram_bot()
             await telegram_app.initialize()
             await telegram_app.start()
-
-            if telegram_app.updater is not None:
-                await telegram_app.updater.start_polling(
-                    drop_pending_updates=False
-                )
-
+            if telegram_app.updater:
+                await telegram_app.updater.start_polling()
             logger.info("Telegram bot started.")
         except Exception:
-            logger.exception("Telegram bot could not start.")
-            if telegram_app is not None:
+            logger.exception("Telegram bot failed to start.")
+            if telegram_app:
                 try:
                     await telegram_app.stop()
                     await telegram_app.shutdown()
@@ -300,17 +441,17 @@ async def lifespan(app: FastAPI):
                     pass
                 telegram_app = None
     else:
-        logger.warning("TELEGRAM_BOT_TOKEN is not configured.")
+        logger.error("TELEGRAM_BOT_TOKEN is missing.")
 
     yield
 
-    if telegram_app is not None:
-        if telegram_app.updater is not None:
+    if telegram_app:
+        if telegram_app.updater:
             await telegram_app.updater.stop()
         await telegram_app.stop()
         await telegram_app.shutdown()
 
-    if engine is not None:
+    if engine:
         await engine.dispose()
 
 
@@ -320,16 +461,18 @@ app = FastAPI(title="Telegram Bingo", lifespan=lifespan)
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return """
-    <!DOCTYPE html>
+    <!doctype html>
     <html lang="en">
     <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Telegram Bingo</title>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      <title>Telegram Bingo</title>
     </head>
     <body>
-        <h1>🎱 Telegram Bingo</h1>
-        <p>Server is running successfully.</p>
+      <h1>🎱 Telegram Bingo</h1>
+      <p>Server is running successfully.</p>
+      <p><a href="/health">Server health</a></p>
+      <p><a href="/health/database">Database health</a></p>
     </body>
     </html>
     """
@@ -346,8 +489,8 @@ async def database_health():
         return {"status": "not_connected"}
 
     try:
-        async with engine.connect() as connection:
-            await connection.execute(text("SELECT 1"))
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
         return {"status": "connected"}
     except SQLAlchemyError:
         logger.exception("Database health check failed.")
