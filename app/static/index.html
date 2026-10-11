@@ -120,7 +120,7 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
 <div class="panel"><div class="title"><h3>👥 Taken Cartelas — Live</h3><span class="muted small" id="takenCount">0 taken</span></div><div class="chips" id="takenList">No cartelas taken yet.</div></div>
 <div id="selectArea">
 <div class="title"><h3 id="chooseCard">Choose Your Cartela (1–200)</h3></div>
-<p class="muted small">Green = available. Black = already taken by a player in this round. The board stays visible during the game and refreshes automatically. Select a green number, set your bet, then press Start Game to reserve it.</p>
+<p class="muted small">Choose an available number. Green = available. Black = already taken. Press Start Game to reserve your selected cartela and join the 30-second countdown.</p>
 <input id="cartelaSearch" class="field" type="number" min="1" max="200" placeholder="Find cartela number (1–200)" oninput="renderChoices()">
 <div class="selection-summary"><span>Selected cartela</span><strong id="selectedCartelaLabel">None</strong></div>
 <label class="small muted" id="stakeLabel">Bet per cartela (minimum 30 Birr)</label>
@@ -155,8 +155,8 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
   <div class="provider-brand-strip" style="grid-template-columns:repeat(4,minmax(0,1fr))">
    <button type="button" class="provider-brand active" data-provider-brand="telebirr" onclick="chooseProvider('telebirr')"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/tele_birr/tele_birr.svg" alt="Telebirr logo"><span>telebirr</span></button>
    <button type="button" class="provider-brand" data-provider-brand="cbe_bank" onclick="chooseProvider('cbe_bank')"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/commercial_bank_of_ethiopia/commercial_bank_of_ethiopia.svg" alt="Commercial Bank of Ethiopia logo"><span>CBE</span></button>
-   <button type="button" class="provider-brand" data-provider-brand="ebirr" onclick="chooseProvider('ebirr')"><img src="https://visit.ebirr.com/img/logo.webp" alt="Official eBirr logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="brand-fallback" style="display:none">eB</span><span>eBirr</span></button>
-   <button type="button" class="provider-brand" data-provider-brand="mpesa" onclick="chooseProvider('mpesa')"><img src="https://play-lh.googleusercontent.com/aNTX4YdITm2ZttFNiuJQ8X-17-656cyOFeTfchNwu9MmhZbBv_Fl1pPUFzv6s5xOMszlrHb3LH6j4JlUrgOiVJk%3Dw240-h480" alt="M-PESA Safaricom Ethiopia official app logo"><span>M-PESA</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="ebirr" onclick="chooseProvider('ebirr')"><img src="https://ebirr.com/favicon.ico" alt="eBirr logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="brand-fallback" style="display:none">eB</span><span>eBirr</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="mpesa" onclick="chooseProvider('mpesa')"><img src="https://m-pesa.safaricom.et/favicon.ico" alt="M-Pesa logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="brand-fallback" style="display:none">M</span><span>M-Pesa</span></button>
   </div>
   <label class="small muted">Choose payment method</label>
   <select class="field" id="provider" onchange="showDepositDetails()">
@@ -164,10 +164,10 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
   </select>
   <div id="depositDetails" class="provider-list"></div>
   <label class="small muted">Amount you deposited (Birr)</label><input class="field" id="amount" type="number" min="1" step="0.01" placeholder="Enter the exact amount, e.g. 100">
-  <label class="small muted">Transaction reference or receipt link</label><input class="field" id="reference" placeholder="Telebirr code, or CBE receipt link from mbreciept.cbe.com.et">
-  <label class="small muted">Payment confirmation SMS (optional, helps compare the amount)</label><textarea class="field sms-box" id="paymentMessage" rows="5" placeholder="Paste the full payment confirmation SMS if available"></textarea>
-  <button class="primary" onclick="deposit()" id="submitDeposit">Verify receipt & submit deposit</button>
-  <p class="muted small" id="depositHelp">Telebirr and new CBE receipt links are checked using the free Cheki public verifier. Wallet credit requires a verified successful receipt, exact amount, matching authorized receiver and unused transaction reference. If any check fails, the request stays pending. Old CBE FT references, eBirr and M-Pesa are not auto-credited.</p>
+  <label class="small muted">Paste the complete payment confirmation SMS</label><textarea class="field sms-box" id="paymentMessage" rows="5" placeholder="Paste the whole message received from Telebirr, CBE, eBirr or M-Pesa"></textarea>
+  <label class="small muted">Transaction/reference code (optional if included in SMS)</label><input class="field" id="reference" placeholder="Can be left blank if SMS contains a reference">
+  <button class="primary" onclick="deposit()" id="submitDeposit">Check message & submit deposit</button>
+  <p class="muted small" id="depositHelp">The app checks the amount written in the SMS against the amount you enter. The SMS itself cannot prove a real payment; funds stay pending until trusted provider verification or trusted payment-system verification.</p>
  </div>
  <div class="panel wallet-pane" id="withdrawPane">
   <h3>⬆️ Withdraw money</h3>
@@ -509,19 +509,20 @@ async function refreshGame(){
   document.getElementById('allCalled').innerHTML=G.called.slice().reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('')||t('empty');
   document.getElementById('recent').innerHTML=G.called.slice(-8).reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('');
   const mine=G.my_cartelas||((G.my_cartela)?[{cartela:G.my_cartela,cartela_number:G.my_cartela_number,stake:0}]:[]);
-  // Keep the full 1–200 cartela board visible for every player, even after
-  // they reserve a card or while the round is running. Taken numbers are
-  // rendered black from the shared PostgreSQL-backed G.players list.
-  document.getElementById('selectArea').classList.remove('hidden');
   if(mine.length){
+    document.getElementById('selectArea').classList.add('hidden');
     document.getElementById('playing').classList.remove('hidden');
     document.getElementById('cardNum').textContent=mine.length+' cartela(s)';
-    document.getElementById('chooseDesc').textContent=G.status==='waiting'?'Your cartela is reserved. Other taken cartelas are black below. Game starts in '+G.lobby_seconds+' seconds.':G.status==='running'?'LIVE — watch the called number and mark it on each cartela.':'Round finished.';
+    document.getElementById('chooseDesc').textContent=G.status==='waiting'?'Cartelas reserved. Game starts in '+G.lobby_seconds+' seconds.':G.status==='running'?'LIVE — watch the called number and mark it on each cartela.':'Round finished.';
     renderCards(mine,G.called,winCells);
+  }else if(G.status==='waiting'){
+    document.getElementById('selectArea').classList.remove('hidden');
+    document.getElementById('playing').classList.add('hidden');
+    renderChoices();
   }else{
+    document.getElementById('selectArea').classList.add('hidden');
     document.getElementById('playing').classList.add('hidden');
   }
-  renderChoices();
   if(G.winner){
     document.getElementById('claimMsg').textContent='🏆 BINGO! '+G.winner.name+' won with Cartela #'+G.winner.cartela_number+' — prize '+money(G.winner.prize||0)+'.';
     document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
@@ -627,14 +628,13 @@ async function deposit(){
     const reference=document.getElementById('reference').value.trim();
     const message=document.getElementById('paymentMessage').value.trim();
     if(!amount||amount<=0)throw Error('Enter the exact amount you deposited.');
-    if(reference.length<5 && message.length<8)throw Error('Enter a transaction reference/receipt link or paste the full confirmation SMS.');
+    if(message.length<8)throw Error('Paste the complete payment confirmation message first.');
     const result=await api('/api/deposits',{
       method:'POST',
       body:JSON.stringify({provider:document.getElementById('provider').value,amount,reference:reference||null,message})
     });
-    msg(`Deposit request #${result.id}: ${result.message || ('Status: '+result.status)}${result.status==='verified'?' Wallet credited.':''}`,result.status!=='verified');
+    msg(`Deposit request #${result.id}: SMS amount matches ${money(result.parsed_amount)}. Status: PENDING verification. Your wallet is credited only after a trusted payment-system record confirms the transfer.`);
     document.getElementById('paymentMessage').value='';
-    document.getElementById('reference').value='';
     await refreshWallet();
   }catch(e){msg(e.message,true);}
 }
@@ -651,14 +651,21 @@ const depositRecipients=[
 ];
 function chooseProvider(p){document.getElementById('provider').value=p;document.querySelectorAll('[data-provider-brand]').forEach(b=>b.classList.toggle('active',b.dataset.providerBrand===p));showDepositDetails();}
 function showDepositDetails(){
- const p=document.getElementById('provider').value;document.querySelectorAll('[data-provider-brand]').forEach(b=>b.classList.toggle('active',b.dataset.providerBrand===p));
+ const p=document.getElementById('provider').value;
+ document.querySelectorAll('[data-provider-brand]').forEach(b=>b.classList.toggle('active',b.dataset.providerBrand===p));
  const host=document.getElementById('depositDetails');
- if(p==='ebirr'||p==='mpesa'){
-  host.innerHTML=`<div class="notice">${p==='ebirr'?'eBirr':'M-Pesa'} is selectable, but its receiving account/phone has not been configured yet. Do not send money until the owner supplies and confirms the correct recipient details.</div>`;
+ if(p==='mpesa'){
+  host.innerHTML='<div class="notice">M-Pesa receiving details have not been configured yet. Do not send money until the owner confirms the recipient.</div>';
   return;
  }
- const rows=p==='cbe_bank'?depositRecipients.filter(x=>x.title==='CBE Bank'):depositRecipients.filter(x=>x.title==='Nahom Million');
- host.innerHTML=rows.map(x=>`<div class="provider-row"><div class="provider-logo">${x.title==='CBE Bank'?'<img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/commercial_bank_of_ethiopia/commercial_bank_of_ethiopia.svg" alt="CBE logo">':'<img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/tele_birr/tele_birr.svg" alt="Telebirr logo">'}</div><div class="details"><b>${esc(x.title)}</b><div class="muted small">${esc(x.detail)}</div><small class="muted">${esc(x.provider)}</small></div><button class="copy-small" onclick="copyValue('${x.detail}')">Copy</button></div>`).join('');
+ const phoneRecipients=depositRecipients.filter(x=>x.title!=='CBE Bank');
+ const rows=p==='cbe_bank'?depositRecipients.filter(x=>x.title==='CBE Bank'):phoneRecipients;
+ const logo=p==='cbe_bank'
+  ? '<img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/commercial_bank_of_ethiopia/commercial_bank_of_ethiopia.svg" alt="CBE logo">'
+  : p==='ebirr'
+    ? '<img src="https://ebirr.com/favicon.ico" alt="eBirr logo" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'grid\'"><span class="brand-fallback" style="display:none">eB</span>'
+    : '<img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/tele_birr/tele_birr.svg" alt="Telebirr logo">';
+ host.innerHTML=rows.map(x=>`<div class="provider-row"><div class="provider-logo">${logo}</div><div class="details"><b>${esc(x.title)}</b><div class="muted small">${esc(x.detail)}</div><small class="muted">${p==='ebirr'?'eBirr phone recipient':x.provider}</small></div><button class="copy-small" onclick="copyValue('${x.detail}')">Copy</button></div>`).join('');
 }
 async function copyValue(value){
  try{
