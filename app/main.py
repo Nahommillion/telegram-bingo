@@ -43,6 +43,8 @@ async def dbinit():
  "CREATE UNIQUE INDEX IF NOT EXISTS uq_bingo_transactions_external_reference ON bingo_transactions(external_reference) WHERE external_reference IS NOT NULL",
  "CREATE TABLE IF NOT EXISTS bingo_referrals(id BIGSERIAL PRIMARY KEY,referrer_telegram_id BIGINT,referred_telegram_id BIGINT UNIQUE,created_at TIMESTAMPTZ DEFAULT NOW())",
  "ALTER TABLE bingo_referrals ADD COLUMN IF NOT EXISTS referrer_telegram_id BIGINT",
+ "ALTER TABLE bingo_referrals ADD COLUMN IF NOT EXISTS referred_telegram_id BIGINT",
+ "CREATE UNIQUE INDEX IF NOT EXISTS uq_bingo_referrals_referred_telegram_id ON bingo_referrals(referred_telegram_id)",
  "CREATE TABLE IF NOT EXISTS deposit_requests(id BIGSERIAL PRIMARY KEY,telegram_id BIGINT,provider TEXT,amount NUMERIC(14,2),reference TEXT,status TEXT DEFAULT 'pending',created_at TIMESTAMPTZ DEFAULT NOW(),verified_at TIMESTAMPTZ)",
   "ALTER TABLE deposit_requests ADD COLUMN IF NOT EXISTS payment_message TEXT",
   "ALTER TABLE deposit_requests ADD COLUMN IF NOT EXISTS parsed_message_amount NUMERIC(14,2)",
@@ -122,7 +124,11 @@ async def start(up,ctx):
   try:
    r=int(ctx.args[0][4:])
    if r!=u.id:
-    async with engine.begin() as c:await c.execute(text("INSERT INTO bingo_referrals(referrer_telegram_id,referred_telegram_id) VALUES(:r,:u) ON CONFLICT(referred_telegram_id) DO NOTHING"),{"r":r,"u":u.id})
+    try:
+     async with engine.begin() as c:await c.execute(text("INSERT INTO bingo_referrals(referrer_telegram_id,referred_telegram_id) VALUES(:r,:u) ON CONFLICT(referred_telegram_id) DO NOTHING"),{"r":r,"u":u.id})
+    except Exception:
+     # Referral tracking must not prevent a user from starting the bot.
+     logger.exception("Referral tracking failed; continuing /start")
   except ValueError:pass
  async with engine.connect() as c:
   phone=(await c.execute(text("SELECT phone_number FROM bingo_users WHERE telegram_id=:i"),{"i":u.id})).scalar_one_or_none()
