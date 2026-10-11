@@ -1,4 +1,4 @@
-import os,json,asyncio,random,hmac,hashlib,urllib.parse,time,secrets,logging,math,re
+import os,json,asyncio,random,hmac,hashlib,urllib.parse,time,secrets,logging,math,re,urllib.request,urllib.error,html
 from contextlib import asynccontextmanager
 from pathlib import Path
 from decimal import Decimal
@@ -355,13 +355,21 @@ async def wallet(req:Request):
 class Dep(BaseModel):
  provider:str
  amount:Decimal=Field(gt=0,le=Decimal("1000000"))
- message:str=Field(min_length=8,max_length=5000)
- reference:Optional[str]=Field(default=None,max_length=200)
+ message:Optional[str]=Field(default=None,max_length=5000)
+ reference:Optional[str]=Field(default=None,max_length=300)
+
+def normalize_digits(value:str)->str:
+ # Normalize Ethiopic/Arabic-Indic numerals if a provider uses them.
+ trans={}
+ for base in (0x0660,0x06F0):
+  for i in range(10): trans[chr(base+i)]=str(i)
+ return (value or "").translate(str.maketrans(trans))
 
 def parse_sms_amount(message:str):
- # Parse an amount only when the SMS labels it or attaches a currency/unit.
+ message=normalize_digits(message or "")
  patterns=[
   r"(?i)(?:amount|paid|payment|received|credited|deposit(?:ed)?|transfer(?:red)?)\s*(?:is|of|:|=)?\s*(?:ETB|Birr|ብር)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:ETB|Birr|ብር)",
+  r"([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*ብር\s*በቀን",
   r"(?i)(?:ETB|Birr|ብር)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)",
   r"(?i)([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:ETB|Birr|ብር)"
  ]
@@ -373,26 +381,132 @@ def parse_sms_amount(message:str):
  return None
 
 def parse_sms_reference(message:str):
+ message=normalize_digits(message or "")
  patterns=[r"(?i)(?:transaction|txn|trans(?:action)?\s*id|reference|ref(?:erence)?\s*(?:no|number|#)?|receipt(?:\s*(?:no|number|#))?)\s*[:#= -]+([A-Z0-9-]{5,})"]
  for pattern in patterns:
   m=re.search(pattern,message)
   if m:return m.group(1).strip()[:200]
  return None
 
+def extract_telebirr_reference(value:str)->Optional[str]:
+ """Accept a raw receipt reference or a URL on the fixed official receipt host only."""
+ value=(value or '').strip()
+ if not value:return None
+ if value.lower().startswith(('https://','http://')):
+  try:
+   u=urllib.parse.urlsplit(value)
+   if u.scheme!='https' or u.hostname!='transactioninfo.ethiotelecom.et' or u.port not in (None,443):return None
+   m=re.fullmatch(r'/receipt/([A-Za-z0-9]{5,40})/?',u.path)
+   return m.group(1) if m else None
+  except Exception:return None
+ return value if re.fullmatch(r'[A-Za-z0-9]{5,40}',value) else None
+
+class _ReceiptTextParser(__import__('html.parser',fromlist=['HTMLParser']).HTMLParser):
+ def __init__(self):
+  super().__init__();self.parts=[];self.hidden=0
+ def handle_starttag(self,tag,attrs):
+  if tag in ('script','style','noscript'):self.hidden+=1
+ def handle_endtag(self,tag):
+  if tag in ('script','style','noscript') and self.hidden:self.hidden-=1
+ def handle_data(self,data):
+  if not self.hidden:self.parts.append(data)
+
+def _fetch_telebirr_receipt(ref:str):
+ """Conservative public receipt parser. It returns data only when fields are explicit."""
+ url='https://transactioninfo.ethiotelecom.et/receipt/'+urllib.parse.quote(ref,safe='')
+ class SafeRedirect(urllib.request.HTTPRedirectHandler):
+  def redirect_request(self,req,fp,code,msg,headers,newurl):
+   u=urllib.parse.urlsplit(newurl)
+   if u.scheme!='https' or u.hostname!='transactioninfo.ethiotelecom.et':return None
+   return super().redirect_request(req,fp,code,msg,headers,newurl)
+ opener=urllib.request.build_opener(SafeRedirect)
+ req=urllib.request.Request(url,headers={'User-Agent':'CartelaBingo-ReceiptCheck/1.0','Accept':'text/html'})
+ try:
+  with opener.open(req,timeout=8) as response:
+   if response.geturl().split('/')[2].lower()!='transactioninfo.ethiotelecom.et':return None
+   raw=response.read(1_000_001)
+   if len(raw)>1_000_000:return None
+   charset=response.headers.get_content_charset() or 'utf-8'
+   page=raw.decode(charset,errors='replace')
+ except Exception as exc:
+  logger.info('Telebirr receipt could not be fetched (%s)',type(exc).__name__)
+  return None
+ parser=_ReceiptTextParser()
+ try:parser.feed(page)
+ except Exception:return None
+ visible=' '.join(html.unescape(x) for x in parser.parts)
+ visible=normalize_digits(re.sub(r'\s+',' ',visible)).strip()
+ if not visible or ref.lower() not in visible.lower():return None
+ low=visible.lower()
+ success=('successful' in low or 'successfully' in low or 'completed' in low or 'በተሳካ ሁኔታ' in visible)
+ failure=any(x in low for x in ('transaction failed','status: failed','unsuccessful','pending'))
+ if not success or failure:return None
+ # Extract only an explicitly labelled transaction amount; never use fees or balance as fallback.
+ amount_patterns=[
+  r'(?i)(?:transaction\s+amount|transfer\s+amount|payment\s+amount|amount\s+transferred|amount)\s*[:：-]?\s*(?:ETB|Birr|ብር)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:ETB|Birr|ብር)?',
+  r'(?:የተላለፈው\s*መጠን|የክፍያ\s*መጠን)\s*[:：-]?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:ETB|Birr|ብር)?'
+ ]
+ amount=None
+ for pat in amount_patterns:
+  m=re.search(pat,visible)
+  if m:
+   try:amount=Decimal(m.group(1).replace(',','')).quantize(Decimal('0.01'));break
+   except Exception:pass
+ if amount is None:return None
+ digits=re.sub(r'\D','',visible)
+ # Require an exact authorized recipient to be present in the receipt text.
+ cbe='1000261740528' in digits
+ telebirr_phone='0943912235' in digits or '251943912235' in digits
+ if not (cbe or telebirr_phone):return None
+ return {'amount':amount,'destination':'cbe_bank' if cbe else 'telebirr','receipt_text':visible[:5000]}
+
+async def verify_telebirr_reference(ref:str,amount:Decimal,request_id:int,telegram_id:int):
+ """Auto-credit only if public receipt exposes success, exact amount and an allowed destination."""
+ data=await asyncio.to_thread(_fetch_telebirr_receipt,ref)
+ if not data:return {'verified':False,'reason':'The public receipt could not be verified with enough detail. The request remains pending for review.'}
+ if data['amount']!=amount:
+  return {'verified':False,'reason':f"The receipt amount ({data['amount']} Birr) does not match your requested amount ({amount} Birr). The request remains pending."}
+ async with engine.begin() as c:
+  inserted=(await c.execute(text("INSERT INTO payment_records(provider,external_reference,amount,payer_reference,memo) VALUES('telebirr',:r,:a,:pr,:m) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{'r':ref,'a':data['amount'],'pr':None,'m':'Public receipt checked; destination='+data['destination']})).scalar_one_or_none()
+  rec=(await c.execute(text("SELECT provider,amount,matched_request_id FROM payment_records WHERE external_reference=:r FOR UPDATE"),{'r':ref})).first()
+  if not rec or rec[0]!='telebirr' or Decimal(str(rec[1])).quantize(Decimal('0.01'))!=data['amount']:
+   return {'verified':False,'reason':'This reference conflicts with an existing payment record. The request remains pending.'}
+  if rec[2] is not None:
+   return {'verified':False,'reason':'This receipt reference has already been used. No second credit was made.'}
+  claimed=(await c.execute(text("UPDATE deposit_requests SET status='verified',verified_at=NOW() WHERE id=:id AND telegram_id=:u AND status='pending' AND amount=:a RETURNING id"),{'id':request_id,'u':telegram_id,'a':amount})).scalar_one_or_none()
+  if claimed is None:return {'verified':False,'reason':'The request could not be safely matched. No wallet credit was made.'}
+  await c.execute(text("UPDATE payment_records SET matched_request_id=:i WHERE external_reference=:r AND matched_request_id IS NULL"),{'i':request_id,'r':ref})
+  await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{'a':amount,'u':telegram_id})
+  await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'deposit',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING"),{'u':telegram_id,'a':amount,'d':f'Auto-verified Telebirr receipt for deposit #{request_id}','r':'payment:'+ref})
+ return {'verified':True,'reason':'Receipt matched the requested amount and an authorized receiving destination.'}
+
 @app.post("/api/deposits")
 async def deposit(b:Dep,req:Request):
  u=await who(req);p=b.provider.lower()
  if p not in PROVIDERS:raise HTTPException(400,"Unknown provider.")
- if not b.message.strip():raise HTTPException(400,"Paste the complete payment confirmation message.")
- parsed=parse_sms_amount(b.message)
- if parsed is None:raise HTTPException(400,"I could not find a clear Birr amount in that message. Paste the complete confirmation SMS exactly as received.")
+ message=(b.message or '').strip()
+ ref=extract_telebirr_reference(b.reference or '')
+ if not ref:ref=extract_telebirr_reference(parse_sms_reference(message) or '')
+ if not ref:
+  # Keep the reference from non-Telebirr providers for manual review, but reject unsafe URL input.
+  raw=(b.reference or parse_sms_reference(message) or '').strip()
+  if raw and not raw.lower().startswith(('http://','https://')) and re.fullmatch(r'[A-Za-z0-9-]{5,200}',raw):ref=raw
+ if not message and not ref:raise HTTPException(400,"Enter the transaction reference or paste the complete confirmation SMS.")
+ parsed=parse_sms_amount(message) if message else None
  entered=b.amount.quantize(Decimal('0.01'))
- if parsed != entered:raise HTTPException(400,f"Amount mismatch: you entered {entered} Birr, but the message appears to show {parsed} Birr. Check the amount and paste the full message.")
- ref=(b.reference or parse_sms_reference(b.message) or ('SMS-'+hashlib.sha256(b.message.encode()).hexdigest()[:16])).strip()[:200]
+ if message and parsed is None:raise HTTPException(400,"I could not find a clear Birr amount in that SMS. Paste the complete confirmation message or submit the transaction reference alone.")
+ if parsed is not None and parsed != entered:raise HTTPException(400,f"Amount mismatch: you entered {entered} Birr, but the message appears to show {parsed} Birr.")
+ if not ref:ref='SMS-'+hashlib.sha256(message.encode()).hexdigest()[:16]
  async with engine.begin() as c:
-  r=await c.execute(text("INSERT INTO deposit_requests(telegram_id,provider,amount,reference,payment_message,parsed_message_amount) VALUES(:i,:p,:a,:r,:m,:pa) RETURNING id"),{"i":int(u["id"]),"p":p,"a":entered,"r":ref,"m":b.message.strip(),"pa":parsed})
- rid=r.scalar_one()
- return {"ok":True,"id":rid,"status":"pending","parsed_amount":float(parsed),"reference":ref,"message":"The amount in your pasted SMS matches your entered amount. Your deposit is pending verification; the pasted SMS alone is not proof of payment."}
+  rid=(await c.execute(text("INSERT INTO deposit_requests(telegram_id,provider,amount,reference,payment_message,parsed_message_amount) VALUES(:i,:p,:a,:r,:m,:pa) RETURNING id"),{'i':int(u['id']),'p':p,'a':entered,'r':ref,'m':message or None,'pa':parsed})).scalar_one()
+ # Only Telebirr references can be checked against the public Telebirr receipt page.
+ # Other providers stay pending until a trusted provider record or admin review is available.
+ if p=='telebirr' and ref and not ref.startswith('SMS-'):
+  result=await verify_telebirr_reference(ref,entered,int(rid),int(u['id']))
+  if result['verified']:
+   return {'ok':True,'id':rid,'status':'verified','parsed_amount':float(entered),'reference':ref,'message':'Receipt verified and wallet credited.'}
+  return {'ok':True,'id':rid,'status':'pending','parsed_amount':float(parsed) if parsed is not None else None,'reference':ref,'message':result['reason']}
+ return {'ok':True,'id':rid,'status':'pending','parsed_amount':float(parsed) if parsed is not None else None,'reference':ref,'message':'Deposit request saved. This provider/reference cannot be independently verified here, so the wallet remains unchanged until trusted confirmation or review.'}
 class Withdrawal(BaseModel):
  provider:str
  amount:Decimal=Field(gt=0,le=Decimal("1000000"))
