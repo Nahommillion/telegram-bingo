@@ -164,10 +164,10 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
   </select>
   <div id="depositDetails" class="provider-list"></div>
   <label class="small muted">Amount you deposited (Birr)</label><input class="field" id="amount" type="number" min="1" step="0.01" placeholder="Enter the exact amount, e.g. 100">
-  <label class="small muted">Transaction/reference code or Telebirr receipt link</label><input class="field" id="reference" placeholder="Paste the transaction code or https://transactioninfo.ethiotelecom.et/receipt/…">
+  <label class="small muted">Transaction reference or receipt link</label><input class="field" id="reference" placeholder="Telebirr code, or CBE receipt link from mbreciept.cbe.com.et">
   <label class="small muted">Payment confirmation SMS (optional, helps compare the amount)</label><textarea class="field sms-box" id="paymentMessage" rows="5" placeholder="Paste the full payment confirmation SMS if available"></textarea>
   <button class="primary" onclick="deposit()" id="submitDeposit">Verify receipt & submit deposit</button>
-  <p class="muted small" id="depositHelp">Telebirr receipts are checked when the public receipt page exposes the amount, successful status, and one of the authorized destinations. If details are missing, the request stays pending. CBE-only, eBirr and M-Pesa references are not auto-credited without trusted confirmation.</p>
+  <p class="muted small" id="depositHelp">Telebirr and new CBE receipt links are checked using the free Cheki public verifier. Wallet credit requires a verified successful receipt, exact amount, matching authorized receiver and unused transaction reference. If any check fails, the request stays pending. Old CBE FT references, eBirr and M-Pesa are not auto-credited.</p>
  </div>
  <div class="panel wallet-pane" id="withdrawPane">
   <h3>⬆️ Withdraw money</h3>
@@ -657,7 +657,7 @@ function showDepositDetails(){
   host.innerHTML=`<div class="notice">${p==='ebirr'?'eBirr':'M-Pesa'} is selectable, but its receiving account/phone has not been configured yet. Do not send money until the owner supplies and confirms the correct recipient details.</div>`;
   return;
  }
- const rows=p==='cbe_bank'?depositRecipients.filter(x=>x.title==='CBE Bank'):depositRecipients.filter(x=>x.title!=='CBE Bank');
+ const rows=p==='cbe_bank'?depositRecipients.filter(x=>x.title==='CBE Bank'):depositRecipients.filter(x=>x.title==='Nahom Million');
  host.innerHTML=rows.map(x=>`<div class="provider-row"><div class="provider-logo">${x.title==='CBE Bank'?'<img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/commercial_bank_of_ethiopia/commercial_bank_of_ethiopia.svg" alt="CBE logo">':'<img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/tele_birr/tele_birr.svg" alt="Telebirr logo">'}</div><div class="details"><b>${esc(x.title)}</b><div class="muted small">${esc(x.detail)}</div><small class="muted">${esc(x.provider)}</small></div><button class="copy-small" onclick="copyValue('${x.detail}')">Copy</button></div>`).join('');
 }
 async function copyValue(value){
