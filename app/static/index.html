@@ -120,7 +120,7 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
 <div class="panel"><div class="title"><h3>👥 Taken Cartelas — Live</h3><span class="muted small" id="takenCount">0 taken</span></div><div class="chips" id="takenList">No cartelas taken yet.</div></div>
 <div id="selectArea">
 <div class="title"><h3 id="chooseCard">Choose Your Cartela (1–200)</h3></div>
-<p class="muted small">Choose an available number. Green = available. Black = already taken. Press Start Game to reserve your selected cartela and join the 30-second countdown.</p>
+<p class="muted small">Green = available. Black = already taken by a player in this round. The board stays visible during the game and refreshes automatically. Select a green number, set your bet, then press Start Game to reserve it.</p>
 <input id="cartelaSearch" class="field" type="number" min="1" max="200" placeholder="Find cartela number (1–200)" oninput="renderChoices()">
 <div class="selection-summary"><span>Selected cartela</span><strong id="selectedCartelaLabel">None</strong></div>
 <label class="small muted" id="stakeLabel">Bet per cartela (minimum 30 Birr)</label>
@@ -155,8 +155,8 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
   <div class="provider-brand-strip" style="grid-template-columns:repeat(4,minmax(0,1fr))">
    <button type="button" class="provider-brand active" data-provider-brand="telebirr" onclick="chooseProvider('telebirr')"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/tele_birr/tele_birr.svg" alt="Telebirr logo"><span>telebirr</span></button>
    <button type="button" class="provider-brand" data-provider-brand="cbe_bank" onclick="chooseProvider('cbe_bank')"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/commercial_bank_of_ethiopia/commercial_bank_of_ethiopia.svg" alt="Commercial Bank of Ethiopia logo"><span>CBE</span></button>
-   <button type="button" class="provider-brand" data-provider-brand="ebirr" onclick="chooseProvider('ebirr')"><img src="https://ebirr.com/favicon.ico" alt="eBirr logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="brand-fallback" style="display:none">eB</span><span>eBirr</span></button>
-   <button type="button" class="provider-brand" data-provider-brand="mpesa" onclick="chooseProvider('mpesa')"><img src="https://m-pesa.safaricom.et/favicon.ico" alt="M-Pesa logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="brand-fallback" style="display:none">M</span><span>M-Pesa</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="ebirr" onclick="chooseProvider('ebirr')"><img src="https://visit.ebirr.com/img/logo.webp" alt="Official eBirr logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="brand-fallback" style="display:none">eB</span><span>eBirr</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="mpesa" onclick="chooseProvider('mpesa')"><img src="https://play-lh.googleusercontent.com/aNTX4YdITm2ZttFNiuJQ8X-17-656cyOFeTfchNwu9MmhZbBv_Fl1pPUFzv6s5xOMszlrHb3LH6j4JlUrgOiVJk%3Dw240-h480" alt="M-PESA Safaricom Ethiopia official app logo"><span>M-PESA</span></button>
   </div>
   <label class="small muted">Choose payment method</label>
   <select class="field" id="provider" onchange="showDepositDetails()">
@@ -509,20 +509,19 @@ async function refreshGame(){
   document.getElementById('allCalled').innerHTML=G.called.slice().reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('')||t('empty');
   document.getElementById('recent').innerHTML=G.called.slice(-8).reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('');
   const mine=G.my_cartelas||((G.my_cartela)?[{cartela:G.my_cartela,cartela_number:G.my_cartela_number,stake:0}]:[]);
+  // Keep the full 1–200 cartela board visible for every player, even after
+  // they reserve a card or while the round is running. Taken numbers are
+  // rendered black from the shared PostgreSQL-backed G.players list.
+  document.getElementById('selectArea').classList.remove('hidden');
   if(mine.length){
-    document.getElementById('selectArea').classList.add('hidden');
     document.getElementById('playing').classList.remove('hidden');
     document.getElementById('cardNum').textContent=mine.length+' cartela(s)';
-    document.getElementById('chooseDesc').textContent=G.status==='waiting'?'Cartelas reserved. Game starts in '+G.lobby_seconds+' seconds.':G.status==='running'?'LIVE — watch the called number and mark it on each cartela.':'Round finished.';
+    document.getElementById('chooseDesc').textContent=G.status==='waiting'?'Your cartela is reserved. Other taken cartelas are black below. Game starts in '+G.lobby_seconds+' seconds.':G.status==='running'?'LIVE — watch the called number and mark it on each cartela.':'Round finished.';
     renderCards(mine,G.called,winCells);
-  }else if(G.status==='waiting'){
-    document.getElementById('selectArea').classList.remove('hidden');
-    document.getElementById('playing').classList.add('hidden');
-    renderChoices();
   }else{
-    document.getElementById('selectArea').classList.add('hidden');
     document.getElementById('playing').classList.add('hidden');
   }
+  renderChoices();
   if(G.winner){
     document.getElementById('claimMsg').textContent='🏆 BINGO! '+G.winner.name+' won with Cartela #'+G.winner.cartela_number+' — prize '+money(G.winner.prize||0)+'.';
     document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
