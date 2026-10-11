@@ -389,6 +389,13 @@ ALLOWED_RECIPIENTS={
  "0937189718":"Tewdros Getu",
  "0934417096":"Tinsae Merga",
 }
+CBE_RECIPIENTS={
+ "1000261740528":"Nahom Million",
+ "1000216646472":"Tewodros Getu",
+}
+# Set MPESA_RECEIVER_NUMBERS in Render to the actual M-Pesa receiving number(s)
+# before enabling M-Pesa wallet credit. Never infer a destination from an SMS.
+MPESA_RECEIVER_NUMBERS={re.sub(r"\D","",x) for x in os.getenv("MPESA_RECEIVER_NUMBERS","").split(",") if re.sub(r"\D","",x)}
 
 def _cheki_verify_sync(payload):
  data=json.dumps(payload).encode("utf-8")
@@ -412,12 +419,63 @@ def _field(data,*names):
   if value not in (None,""):return value
  return None
 
-def _receiver_matches(data):
- receiver=_field(data,"receiverAccount","receiver_account","receiverPhone","receiver_phone","recipientAccount","recipientPhone","receiver")
- digits=re.sub(r"\D","",str(receiver or ""))
- if digits and any(digits.endswith(re.sub(r"\D","",phone)[-9:]) for phone in ALLOWED_RECIPIENTS):return True
+def _field_digits(data,*names):
+ value=_field(data,*names)
+ return re.sub(r"\D","",str(value or ""))
+
+def _phone_receiver_matches(data, allowed=None):
+ allowed=allowed if allowed is not None else set(ALLOWED_RECIPIENTS)
+ digits=_field_digits(data,"receiverAccount","receiver_account","receiverPhone","receiver_phone","recipientAccount","recipientPhone","receiver")
+ return bool(digits and any(digits.endswith(re.sub(r"\D","",phone)[-9:]) for phone in allowed))
+
+def _cbe_receiver_matches(data):
+ digits=_field_digits(data,"receiverAccount","receiver_account","recipientAccount","receiver")
+ if digits and any(digits.endswith(account[-4:]) for account in CBE_RECIPIENTS):return True
  name=str(_field(data,"receiverName","receiver_name","recipientName","recipient_name") or "").strip().casefold()
- return bool(name and any(name==recipient.casefold() for recipient in ALLOWED_RECIPIENTS.values()))
+ return bool(name and any(name==person.casefold() for person in CBE_RECIPIENTS.values()))
+
+def _receiver_matches(data):
+ name=str(_field(data,"receiverName","receiver_name","recipientName","recipient_name") or "").strip().casefold()
+ return _phone_receiver_matches(data) or bool(name and any(name==recipient.casefold() for recipient in ALLOWED_RECIPIENTS.values()))
+
+def _ebirr_receipt_url(message, reference):
+ # eBirr receipt tokens are tenant-specific; a complete receipt URL is needed
+ # for reliable auto-detection by the receipt verifier.
+ m=re.search(r"https?://receipt\.ebirr\.com/[^\s<>\"']+", message, re.I)
+ if m:return m.group(0).rstrip(".,)")
+ if re.match(r"^[^/\s]+/[^/\s]+$", reference) and not reference.lower().startswith("http"):
+  return "https://receipt.ebirr.com/"+reference
+ return None
+
+def _verification_amount(data):
+ value=_field(data,"amount","transactionAmount","transaction_amount")
+ try:return Decimal(str(value).replace(",","")).quantize(Decimal("0.01"))
+ except Exception:return None
+
+async def _verify_deposit_receipt(provider, reference, message):
+ """Verify with Cheki's public receipt lookup; return (result, data, reason)."""
+ if provider=="telebirr":
+  result=await _cheki_verify({"bank":"telebirr","reference":reference})
+ elif provider=="cbe_bank":
+  result=None
+  # Legacy CBE receipts need the last 8 digits of the receiving account.
+  for account in CBE_RECIPIENTS:
+   candidate=await _cheki_verify({"bank":"cbe","reference":reference,"accountNumber":account[-8:]})
+   candidate_data=(candidate.get("data") if candidate and isinstance(candidate.get("data"),dict) else candidate) or {}
+   if candidate and candidate.get("success") is True and candidate.get("verified") is True:
+    result=candidate
+    break
+   result=candidate
+ elif provider=="mpesa":
+  result=await _cheki_verify({"bank":"mpesa","reference":reference})
+ elif provider=="ebirr":
+  receipt_url=_ebirr_receipt_url(message,reference)
+  if not receipt_url:return None,{},"eBirr needs the complete official receipt link (receipt.ebirr.com/tenant/token); an SMS reference alone cannot be independently verified."
+  result=await _cheki_verify({"reference":receipt_url})
+ else:
+  return None,{},"This payment type does not yet have a supported independent receipt lookup."
+ data=(result.get("data") if result and isinstance(result.get("data"),dict) else result) or {}
+ return result,data,None
 
 async def _credit_verified_deposit(uid,provider,amount,reference,payment_message):
  # One DB transaction and a unique ledger reference prevent concurrent/replayed credits.
@@ -454,35 +512,38 @@ async def deposit(b:Dep,req:Request):
  ref=(b.reference or parse_sms_reference(message) or '').strip()[:200]
  if not ref:raise HTTPException(400,"Could not find a transaction reference in the SMS. Paste the complete original message or enter its reference code.")
  uid=int(u["id"])
- # A pasted SMS is untrusted. Telebirr is automatically credited only after the
- # public verifier confirms the transaction, exact amount/currency and approved receiver.
- if p=="telebirr":
-  verified=await _cheki_verify({"bank":"telebirr","reference":ref})
-  data=(verified.get("data") if verified and isinstance(verified.get("data"),dict) else verified) or {}
-  verified_amount=_field(data,"amount","transactionAmount","transaction_amount")
-  currency=str(_field(data,"currency","currencyCode","currency_code") or "ETB").upper()
-  try:verified_amount=Decimal(str(verified_amount).replace(",","")).quantize(Decimal("0.01"))
-  except Exception:verified_amount=None
-  if not verified or verified.get("success") is not True or verified.get("verified") is not True:
-   status_message="Receipt verification could not confirm this payment. It has been saved as pending; no wallet credit was made."
-  elif verified_amount != entered or currency not in ("ETB","BIRR"):
-   status_message="Verified receipt amount or currency did not match. Deposit remains pending; no wallet credit was made."
-  elif not _receiver_matches(data):
-   status_message="Receipt did not confirm one of the three approved recipient phone numbers. Deposit remains pending; no wallet credit was made."
+ # A pasted SMS is untrusted. Each supported provider must be independently verified,
+ # match the requested amount/currency and match an approved receiving account.
+ verified,data,unsupported_reason=await _verify_deposit_receipt(p,ref,message)
+ if verified and verified.get("success") is True and verified.get("verified") is True:
+  verified_amount=_verification_amount(data)
+  currency=str(_field(data,"currency","currencyCode","currency_code") or "").upper()
+  receiver_ok=False
+  if p in ("telebirr",):
+   receiver_ok=_receiver_matches(data)
+  elif p=="cbe_bank":
+   receiver_ok=_cbe_receiver_matches(data)
+  elif p=="ebirr":
+   receiver_ok=_phone_receiver_matches(data)
+  elif p=="mpesa":
+   receiver_ok=bool(MPESA_RECEIVER_NUMBERS and _phone_receiver_matches(data,MPESA_RECEIVER_NUMBERS))
+  if verified_amount != entered or currency not in ("ETB","BIRR"):
+   status_message="The verified receipt amount or currency does not match your deposit. It remains pending; no wallet credit was made."
+  elif not receiver_ok:
+   if p=="mpesa" and not MPESA_RECEIVER_NUMBERS:
+    status_message="M-Pesa receipt found, but the approved M-Pesa receiving number is not configured yet. Request remains pending; no wallet credit was made."
+   else:
+    status_message="The verified receipt does not match an approved receiving account. It remains pending; no wallet credit was made."
   else:
    try:
     credited=await _credit_verified_deposit(uid,p,entered,ref,message)
    except HTTPException:raise
    if not credited:raise HTTPException(409,"This transaction reference was already processed. No duplicate credit was made.")
    return {"ok":True,"status":"verified","reference":ref,"parsed_amount":float(parsed),"message":"Payment independently verified. Your wallet has been credited automatically."}
-  async with engine.begin() as c:
-   exists=(await c.execute(text("SELECT id FROM deposit_requests WHERE provider=:p AND reference=:r AND status IN ('pending','verified') LIMIT 1"),{"p":p,"r":ref})).scalar_one_or_none()
-   if exists is not None:
-    return {"ok":True,"id":exists,"status":"pending","parsed_amount":float(parsed),"reference":ref,"message":"This reference already has a deposit request. No duplicate credit was made."}
-   rid=(await c.execute(text("INSERT INTO deposit_requests(telegram_id,provider,amount,reference,payment_message,parsed_message_amount) VALUES(:i,:p,:a,:r,:m,:pa) RETURNING id"),{"i":uid,"p":p,"a":entered,"r":ref,"m":message,"pa":parsed})).scalar_one()
-  return {"ok":True,"id":rid,"status":"pending","parsed_amount":float(parsed),"reference":ref,"message":status_message}
- # eBirr/CBE/M-Pesa are not credited from pasted text. They are credited automatically
- # when an authenticated trusted payment record arrives at /api/payments/records.
+ elif not verified:
+  status_message=unsupported_reason or "The receipt verification service is unreachable or returned no result. The request remains pending; no wallet credit was made. Please retry later."
+ else:
+  status_message="The receipt verification service could not confirm this transaction. It remains pending; no wallet credit was made."
  async with engine.begin() as c:
   exists=(await c.execute(text("SELECT id FROM deposit_requests WHERE provider=:p AND reference=:r LIMIT 1"),{"p":p,"r":ref})).scalar_one_or_none()
   if exists is not None:return {"ok":True,"id":exists,"status":"pending","reference":ref,"message":"This reference already has a request. No duplicate credit was made."}
@@ -556,8 +617,8 @@ async def payment(b:Payment,x_payment_api_key:str=Header(default="")):
   if not receiver_digits or receiver_digits[-9:] not in allowed_phone_suffixes:
    raise HTTPException(400,"Receiver must be one of the configured Telebirr/eBirr phone recipients; no wallet credit was made.")
  elif p in ("cbe_bank","cbe_birr"):
-  if not receiver_digits or not receiver_digits.endswith("0528"):
-   raise HTTPException(400,"Receiver must be the configured CBE account ending 0528; no wallet credit was made.")
+  if not receiver_digits or not any(receiver_digits.endswith(suffix) for suffix in ("0528", "6472")):
+   raise HTTPException(400,"Receiver must be one of the configured CBE accounts ending 0528 or 6472; no wallet credit was made.")
  elif p=="mpesa":
   raise HTTPException(400,"M-Pesa receiving details are not configured; no wallet credit was made.")
  async with engine.begin() as c:
