@@ -647,7 +647,8 @@ const depositRecipients=[
  {title:'Nahom Million',detail:'0943912235',provider:'Phone recipient'},
  {title:'Tewdros Getu',detail:'0937189718',provider:'Phone recipient'},
  {title:'Tinsae Merga',detail:'0934417096',provider:'Phone recipient'},
- {title:'CBE Bank',detail:'1000261740528',provider:'CBE account'}
+ {title:'Nahom Million',detail:'1000261740528',provider:'CBE account'},
+ {title:'Tewodros Getu',detail:'1000216646472',provider:'CBE account'}
 ];
 function chooseProvider(p){document.getElementById('provider').value=p;document.querySelectorAll('[data-provider-brand]').forEach(b=>b.classList.toggle('active',b.dataset.providerBrand===p));showDepositDetails();}
 function showDepositDetails(){
@@ -658,8 +659,8 @@ function showDepositDetails(){
   host.innerHTML='<div class="notice">M-Pesa receiving details have not been configured yet. Do not send money until the owner confirms the recipient.</div>';
   return;
  }
- const phoneRecipients=depositRecipients.filter(x=>x.title!=='CBE Bank');
- const rows=p==='cbe_bank'?depositRecipients.filter(x=>x.title==='CBE Bank'):phoneRecipients;
+ const phoneRecipients=depositRecipients.filter(x=>x.provider==='Phone recipient');
+ const rows=p==='cbe_bank'?depositRecipients.filter(x=>x.provider==='CBE account'):phoneRecipients;
  const logo=p==='cbe_bank'
   ? '<img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/commercial_bank_of_ethiopia/commercial_bank_of_ethiopia.svg" alt="CBE logo">'
   : p==='ebirr'
