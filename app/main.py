@@ -382,7 +382,7 @@ def parse_sms_amount(message:str):
 
 def parse_sms_reference(message:str):
  message=normalize_digits(message or "")
- patterns=[r"(?i)(?:transaction|txn|trans(?:action)?\s*id|reference|ref(?:erence)?\s*(?:no|number|#)?|receipt(?:\s*(?:no|number|#))?)\s*[:#= -]+([A-Z0-9-]{5,})"]
+ patterns=[r"(?i)(?:transaction|txn|trans(?:action)?\s*id|reference|ref(?:erence)?\s*(?:no|number|#)?|receipt(?:\s*(?:no|number|#))?)\s*[:#= -]+([A-Z0-9-]{5,})", r"ቁጥርዎ\s*[:：#= -]*([A-Z0-9]{8,14})"]
  for pattern in patterns:
   m=re.search(pattern,message)
   if m:return m.group(1).strip()[:200]
@@ -460,53 +460,147 @@ def _fetch_telebirr_receipt(ref:str):
  if not (cbe or telebirr_phone):return None
  return {'amount':amount,'destination':'cbe_bank' if cbe else 'telebirr','receipt_text':visible[:5000]}
 
-async def verify_telebirr_reference(ref:str,amount:Decimal,request_id:int,telegram_id:int):
- """Auto-credit only if public receipt exposes success, exact amount and an allowed destination."""
- data=await asyncio.to_thread(_fetch_telebirr_receipt,ref)
- if not data:return {'verified':False,'reason':'The public receipt could not be verified with enough detail. The request remains pending for review.'}
- if data['amount']!=amount:
-  return {'verified':False,'reason':f"The receipt amount ({data['amount']} Birr) does not match your requested amount ({amount} Birr). The request remains pending."}
+def extract_cbe_receipt_url(value:str)->Optional[str]:
+ """Accept only CBE's public receipt host, never arbitrary URLs."""
+ value=(value or "").strip().rstrip(".,;)")
+ if not value:return None
+ try:
+  u=urllib.parse.urlsplit(value)
+  if u.scheme!="https" or u.hostname!="mbreciept.cbe.com.et" or u.port not in (None,443) or u.username or u.password:return None
+  if not re.fullmatch(r"/[A-Za-z0-9_-]{8,100}\.?",u.path):return None
+  path=u.path.rstrip(".")
+  return urllib.parse.urlunsplit(("https","mbreciept.cbe.com.et",path,u.query,""))
+ except Exception:return None
+
+def _cheki_verify(payload:dict)->dict:
+ """Call the public Cheki verifier; this is a third-party scraper, not a bank API."""
+ data=json.dumps(payload).encode("utf-8")
+ request=urllib.request.Request("https://cheki.et/api/verify",data=data,headers={"Content-Type":"application/json","Accept":"application/json","User-Agent":"CartelaBingo/1.0"},method="POST")
+ try:
+  with urllib.request.urlopen(request,timeout=12) as response:
+   raw=response.read(250001)
+   if len(raw)>250000:return {"success":False,"error":"Verifier response was too large."}
+   parsed=json.loads(raw.decode("utf-8"))
+   return parsed if isinstance(parsed,dict) else {"success":False,"error":"Invalid verifier response."}
+ except Exception as exc:
+  logger.warning("Cheki receipt verification failed (%s)",type(exc).__name__)
+  return {"success":False,"error":"The free receipt verifier is temporarily unreachable. No balance was changed."}
+
+def _field(data:dict,*names):
+ for name in names:
+  value=data.get(name)
+  if value not in (None,""):
+   return str(value)
+ return ""
+
+def _destination_matches(provider:str,data:dict)->bool:
+ """Require the verified receipt's receiver field to show an allowed destination suffix."""
+ if provider=="telebirr":
+  receiver=_field(data,"creditedPartyAccountNumber","creditedPartyAccount","receiverAccount","receiverPhone","creditedPartyPhone","receiverAccountNumber","receiverMsisdn","receiverNumber")
+  allowed=("0528","2235") # CBE account ending 0528 or Telebirr number ending 2235
+ elif provider=="cbe_bank":
+  receiver=_field(data,"receiverAccount","receiverAccountNumber","creditedPartyAccountNumber","creditedPartyAccount")
+  allowed=("0528",)
+ else:return False
+ digits=re.sub(r"\D","",receiver)
+ return bool(digits and any(digits.endswith(suffix) for suffix in allowed))
+
+async def verify_deposit_reference(provider:str,reference:str,amount:Decimal,request_id:int,telegram_id:int)->dict:
+ """Verify via Cheki and credit once only when success, amount and destination all match."""
+ if provider=="telebirr":
+  ref=extract_telebirr_reference(reference)
+  if not ref:return {"verified":False,"reason":"Enter a Telebirr transaction reference or official receipt URL."}
+  payload={"bank":"telebirr","reference":ref}
+  provider_label="telebirr"
+  request_ref=ref
+ elif provider=="cbe_bank":
+  url=extract_cbe_receipt_url(reference)
+  if not url:return {"verified":False,"reason":"For CBE, paste the new receipt link from the CBE app (mbreciept.cbe.com.et). An old FT reference alone cannot be verified by this free checker."}
+  payload={"reference":url}
+  provider_label="cbe_bank"
+  request_ref=url
+ else:
+  return {"verified":False,"reason":"This provider is not supported by the free verifier yet. No wallet credit was made."}
+ data=await asyncio.to_thread(_cheki_verify,payload)
+ # success means the verifier request worked; verified must independently be true.
+ if data.get("success") is not True or data.get("verified") is not True:
+  reason=str(data.get("error") or data.get("message") or "The verifier could not confirm this receipt.")
+  return {"verified":False,"reason":reason+" No wallet credit was made."}
+ try:
+  verified_amount=Decimal(str(data.get("amount"))).quantize(Decimal("0.01"))
+ except Exception:
+  return {"verified":False,"reason":"The verifier did not return a valid transaction amount. No wallet credit was made."}
+ if str(data.get("currency","ETB")).upper() not in ("ETB","BIRR"):
+  return {"verified":False,"reason":"The receipt currency is not ETB. No wallet credit was made."}
+ if verified_amount!=amount.quantize(Decimal("0.01")):
+  return {"verified":False,"reason":f"Verified receipt amount is {verified_amount} Birr, not {amount} Birr. No wallet credit was made."}
+ if not _destination_matches(provider,data):
+  logger.warning("Verified %s receipt did not expose a matching authorized receiver; keys=%s",provider,sorted(data.keys()))
+  return {"verified":False,"reason":"The receipt was found, but the verifier did not show a receiver account matching your authorized destination ending 0528 or Telebirr phone ending 2235. It remains pending; no wallet credit was made."}
+ external_ref=_field(data,"reference","transactionNumber","transactionId") or (extract_telebirr_reference(reference) if provider=="telebirr" else request_ref)
+ if not re.fullmatch(r"[A-Za-z0-9._:-]{5,200}",external_ref):
+  return {"verified":False,"reason":"The verifier returned an invalid transaction reference. No wallet credit was made."}
+ # CBE links can change shape; use the bank's transaction reference for duplicate protection.
+ unique_ref=external_ref if provider=="telebirr" else "cbe:"+external_ref
  async with engine.begin() as c:
-  inserted=(await c.execute(text("INSERT INTO payment_records(provider,external_reference,amount,payer_reference,memo) VALUES('telebirr',:r,:a,:pr,:m) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{'r':ref,'a':data['amount'],'pr':None,'m':'Public receipt checked; destination='+data['destination']})).scalar_one_or_none()
-  rec=(await c.execute(text("SELECT provider,amount,matched_request_id FROM payment_records WHERE external_reference=:r FOR UPDATE"),{'r':ref})).first()
-  if not rec or rec[0]!='telebirr' or Decimal(str(rec[1])).quantize(Decimal('0.01'))!=data['amount']:
-   return {'verified':False,'reason':'This reference conflicts with an existing payment record. The request remains pending.'}
-  if rec[2] is not None:
-   return {'verified':False,'reason':'This receipt reference has already been used. No second credit was made.'}
-  claimed=(await c.execute(text("UPDATE deposit_requests SET status='verified',verified_at=NOW() WHERE id=:id AND telegram_id=:u AND status='pending' AND amount=:a RETURNING id"),{'id':request_id,'u':telegram_id,'a':amount})).scalar_one_or_none()
-  if claimed is None:return {'verified':False,'reason':'The request could not be safely matched. No wallet credit was made.'}
-  await c.execute(text("UPDATE payment_records SET matched_request_id=:i WHERE external_reference=:r AND matched_request_id IS NULL"),{'i':request_id,'r':ref})
-  await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{'a':amount,'u':telegram_id})
-  await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'deposit',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING"),{'u':telegram_id,'a':amount,'d':f'Auto-verified Telebirr receipt for deposit #{request_id}','r':'payment:'+ref})
- return {'verified':True,'reason':'Receipt matched the requested amount and an authorized receiving destination.'}
+  # A verified reference must be globally unique in our ledger. Insert is the concurrency gate.
+  inserted=(await c.execute(text("INSERT INTO payment_records(provider,external_reference,amount,payer_reference,memo) VALUES(:p,:r,:a,NULL,:m) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{"p":provider_label,"r":unique_ref,"a":verified_amount,"m":"Verified by free Cheki public receipt checker; receiver suffix matched"})).scalar_one_or_none()
+  if inserted is None:
+   return {"verified":False,"reason":"This transaction reference has already been submitted or credited. No second wallet credit was made."}
+  already=(await c.execute(text("SELECT id FROM bingo_transactions WHERE external_reference=:r"),{"r":"payment:"+unique_ref})).scalar_one_or_none()
+  if already is not None:
+   await c.execute(text("DELETE FROM payment_records WHERE external_reference=:r"),{"r":unique_ref})
+   return {"verified":False,"reason":"This reference already exists in the wallet ledger. No second credit was made."}
+  claimed=(await c.execute(text("UPDATE deposit_requests SET status='verified',verified_at=NOW() WHERE id=:id AND telegram_id=:u AND status='pending' AND amount=:a RETURNING id"),{"id":request_id,"u":telegram_id,"a":amount})).scalar_one_or_none()
+  if claimed is None:
+   await c.execute(text("DELETE FROM payment_records WHERE external_reference=:r"),{"r":unique_ref})
+   return {"verified":False,"reason":"The deposit request could not be safely matched. No wallet credit was made."}
+  matched=(await c.execute(text("UPDATE payment_records SET matched_request_id=:i WHERE external_reference=:r AND matched_request_id IS NULL RETURNING id"),{"i":request_id,"r":unique_ref})).scalar_one_or_none()
+  if matched is None:
+   raise RuntimeError("Payment reference could not be claimed atomically")
+  await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'deposit',:a,'verified',:d,:r)"),{"u":telegram_id,"a":amount,"d":f"Cheki-verified {provider_label} deposit #{request_id}","r":"payment:"+unique_ref})
+  await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":amount,"u":telegram_id})
+ return {"verified":True,"reason":"Receipt verified, amount and authorized receiver matched, and wallet credited once."}
 
 @app.post("/api/deposits")
 async def deposit(b:Dep,req:Request):
  u=await who(req);p=b.provider.lower()
  if p not in PROVIDERS:raise HTTPException(400,"Unknown provider.")
  message=(b.message or '').strip()
- ref=extract_telebirr_reference(b.reference or '')
- if not ref:ref=extract_telebirr_reference(parse_sms_reference(message) or '')
- if not ref:
-  # Keep the reference from non-Telebirr providers for manual review, but reject unsafe URL input.
-  raw=(b.reference or parse_sms_reference(message) or '').strip()
-  if raw and not raw.lower().startswith(('http://','https://')) and re.fullmatch(r'[A-Za-z0-9-]{5,200}',raw):ref=raw
- if not message and not ref:raise HTTPException(400,"Enter the transaction reference or paste the complete confirmation SMS.")
+ raw=(b.reference or '').strip()
+ if not raw and message:
+  sms_ref=parse_sms_reference(message)
+  if sms_ref:raw=sms_ref
+ if p=="telebirr":
+  ref=extract_telebirr_reference(raw)
+  if not ref and raw and not raw.lower().startswith(("http://","https://")) and re.fullmatch(r"[A-Za-z0-9-]{5,40}",raw):ref=raw
+ elif p=="cbe_bank":
+  ref=extract_cbe_receipt_url(raw) or (raw if not raw.lower().startswith(("http://","https://")) and re.fullmatch(r"[A-Za-z0-9-]{5,200}",raw) else None)
+ else:
+  ref=raw if raw and not raw.lower().startswith(("http://","https://")) and re.fullmatch(r"[A-Za-z0-9-]{5,200}",raw) else None
+ if not message and not ref:raise HTTPException(400,"Enter a transaction reference or the provider's receipt link.")
  parsed=parse_sms_amount(message) if message else None
  entered=b.amount.quantize(Decimal('0.01'))
- if message and parsed is None:raise HTTPException(400,"I could not find a clear Birr amount in that SMS. Paste the complete confirmation message or submit the transaction reference alone.")
- if parsed is not None and parsed != entered:raise HTTPException(400,f"Amount mismatch: you entered {entered} Birr, but the message appears to show {parsed} Birr.")
+ if message and parsed is None:raise HTTPException(400,"I could not find a clear Birr amount in that SMS. Paste the full confirmation SMS or submit the receipt reference alone.")
+ if parsed is not None and parsed != entered:raise HTTPException(400,f"Amount mismatch: the SMS appears to show {parsed} Birr, but you entered {entered} Birr.")
  if not ref:ref='SMS-'+hashlib.sha256(message.encode()).hexdigest()[:16]
+ if p in ("telebirr","cbe_bank") and not ref.startswith("SMS-"):
+  # Fast duplicate pre-check for a friendly message; the unique DB constraint remains authoritative.
+  unique_hint=ref if p=="telebirr" else None
+  if unique_hint:
+   async with engine.connect() as c:
+    old=(await c.execute(text("SELECT matched_request_id FROM payment_records WHERE external_reference=:r"),{"r":unique_hint})).first()
+   if old:
+    raise HTTPException(409,"This payment reference has already been submitted or credited. It cannot be used again.")
  async with engine.begin() as c:
   rid=(await c.execute(text("INSERT INTO deposit_requests(telegram_id,provider,amount,reference,payment_message,parsed_message_amount) VALUES(:i,:p,:a,:r,:m,:pa) RETURNING id"),{'i':int(u['id']),'p':p,'a':entered,'r':ref,'m':message or None,'pa':parsed})).scalar_one()
- # Only Telebirr references can be checked against the public Telebirr receipt page.
- # Other providers stay pending until a trusted provider record or admin review is available.
- if p=='telebirr' and ref and not ref.startswith('SMS-'):
-  result=await verify_telebirr_reference(ref,entered,int(rid),int(u['id']))
+ if p in ("telebirr","cbe_bank") and not ref.startswith("SMS-"):
+  result=await verify_deposit_reference(p,ref,entered,int(rid),int(u['id']))
   if result['verified']:
-   return {'ok':True,'id':rid,'status':'verified','parsed_amount':float(entered),'reference':ref,'message':'Receipt verified and wallet credited.'}
+   return {'ok':True,'id':rid,'status':'verified','parsed_amount':float(entered),'reference':ref,'message':result['reason']}
   return {'ok':True,'id':rid,'status':'pending','parsed_amount':float(parsed) if parsed is not None else None,'reference':ref,'message':result['reason']}
- return {'ok':True,'id':rid,'status':'pending','parsed_amount':float(parsed) if parsed is not None else None,'reference':ref,'message':'Deposit request saved. This provider/reference cannot be independently verified here, so the wallet remains unchanged until trusted confirmation or review.'}
+ return {'ok':True,'id':rid,'status':'pending','parsed_amount':float(parsed) if parsed is not None else None,'reference':ref,'message':'Request saved. This provider cannot be reliably checked by the free verifier yet, so the wallet remains unchanged until trusted confirmation.'}
+
 class Withdrawal(BaseModel):
  provider:str
  amount:Decimal=Field(gt=0,le=Decimal("1000000"))
