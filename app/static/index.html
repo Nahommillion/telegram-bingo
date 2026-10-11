@@ -144,7 +144,7 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
 
 <section class="screen" id="wallet">
  <div class="title"><h3 id="walletTitle">💳 Wallet</h3></div>
- <div class="panel"><div class="muted small" id="currentBalLabel">AVAILABLE BALANCE</div><h2 id="walletBal">0.00 Birr</h2><div class="notice" id="autoNote">Deposits and withdrawals remain pending until verified by the operator/payment process. Never send money to a recipient you have not checked.</div></div>
+ <div class="panel"><div class="muted small" id="currentBalLabel">AVAILABLE BALANCE</div><h2 id="walletBal">0.00 Birr</h2><div class="notice" id="autoNote">Deposits are credited automatically only after Check.et confirms the payment. Withdrawals may still require processing. Never send money to an unverified recipient.</div></div>
  <div class="wallet-actions">
   <button class="wallet-tab active" data-wallet-tab="deposit" onclick="walletTab('deposit')">➕ Deposit</button>
   <button class="wallet-tab" data-wallet-tab="withdraw" onclick="walletTab('withdraw')">⬆️ Withdraw</button>
@@ -152,22 +152,28 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
  </div>
  <div class="panel wallet-pane active" id="depositPane">
   <h3 id="depositReq">➕ Deposit</h3>
-  <div class="provider-brand-strip" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+  <div class="provider-brand-strip" style="grid-template-columns:repeat(5,minmax(0,1fr))">
    <button type="button" class="provider-brand active" data-provider-brand="telebirr" onclick="chooseProvider('telebirr')"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/tele_birr/tele_birr.svg" alt="Telebirr logo"><span>telebirr</span></button>
-   <button type="button" class="provider-brand" data-provider-brand="cbe_bank" onclick="chooseProvider('cbe_bank')"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/commercial_bank_of_ethiopia/commercial_bank_of_ethiopia.svg" alt="Commercial Bank of Ethiopia logo"><span>CBE</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="cbe_bank" onclick="chooseProvider('cbe_bank')"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/commercial_bank_of_ethiopia/commercial_bank_of_ethiopia.svg" alt="Commercial Bank of Ethiopia logo"><span>CBE Bank</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="cbe_birr" onclick="chooseProvider('cbe_birr')"><span class="brand-fallback">CB</span><span>CBE Birr</span></button>
    <button type="button" class="provider-brand" data-provider-brand="ebirr" onclick="chooseProvider('ebirr')"><img src="https://visit.ebirr.com/img/logo.webp" alt="Official eBirr logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="brand-fallback" style="display:none">eB</span><span>eBirr</span></button>
    <button type="button" class="provider-brand" data-provider-brand="mpesa" onclick="chooseProvider('mpesa')"><img src="https://play-lh.googleusercontent.com/aNTX4YdITm2ZttFNiuJQ8X-17-656cyOFeTfchNwu9MmhZbBv_Fl1pPUFzv6s5xOMszlrHb3LH6j4JlUrgOiVJk%3Dw240-h480" alt="M-PESA Safaricom Ethiopia official app logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="brand-fallback" style="display:none">M</span><span>M-Pesa</span></button>
   </div>
   <label class="small muted">Choose payment method</label>
   <select class="field" id="provider" onchange="showDepositDetails()">
-   <option value="telebirr">Telebirr</option><option value="cbe_bank">CBE Bank</option><option value="ebirr">eBirr</option><option value="mpesa">M-Pesa</option>
+   <option value="telebirr">Telebirr</option><option value="cbe_bank">CBE Bank</option><option value="cbe_birr">CBE Birr</option><option value="ebirr">eBirr</option><option value="mpesa">M-Pesa</option>
   </select>
   <div id="depositDetails" class="provider-list"></div>
+  <div id="payerPhoneWrap" class="hidden">
+   <label class="small muted">CBE Birr payer phone number</label>
+   <input class="field" id="payerPhone" type="tel" placeholder="Phone number used to send the payment">
+   <p class="muted small">Enter the phone number that made this CBE Birr payment. Check.et requires it to verify CBE Birr receipts.</p>
+  </div>
   <label class="small muted">Amount you deposited (Birr)</label><input class="field" id="amount" type="number" min="1" step="0.01" placeholder="Enter the exact amount, e.g. 100">
   <label class="small muted">Paste the official receipt link or complete payment SMS</label><textarea class="field sms-box" id="paymentMessage" rows="5" placeholder="Paste the official receipt link, or the full payment confirmation SMS"></textarea>
   <label class="small muted">Transaction/reference code (optional if included in the link or SMS)</label><input class="field" id="reference" placeholder="Optional if the receipt link or SMS contains a reference">
   <button class="primary" onclick="deposit()" id="submitDeposit">Verify receipt & submit deposit</button>
-  <p class="muted small" id="depositHelp">Check.et verifies the receipt. Your wallet is credited only when the verified amount and approved receiving account match. eBirr is not currently listed as a supported Check.et API provider, so eBirr requests stay pending.</p>
+  <p class="muted small" id="depositHelp">Check.et verifies supported receipts. The wallet is credited only after the transaction, amount, currency, and completed status are confirmed. eBirr cannot be auto-credited until a compatible verification API is configured.</p>
  </div>
  <div class="panel wallet-pane" id="withdrawPane">
   <h3>⬆️ Withdraw money</h3>
@@ -249,6 +255,7 @@ if (tg) {
 }
 
 let L = 'en';
+let mpesaReceivers = [];
 let me = null;
 let G = null;
 let winCells = [];
@@ -272,9 +279,9 @@ const strings = {
     stakeLabel:'Bet per cartela (minimum 30 Birr)',yourCard:'Your Cartela',
     calledTitle:'📣 Called Numbers',bingo:'🏆 BINGO!',
     walletTitle:'💳 Wallet & Deposits',currentBalLabel:'CURRENT BALANCE',
-    autoNote:'Paste the official receipt link or payment SMS below. Check.et verifies it; the app credits your wallet only after amount and approved recipient checks pass.',
+    autoNote:'Deposits are credited automatically only after Check.et confirms the payment. Withdrawals may still require processing. Never send money to an unverified recipient.',
     depositReq:'➕ Create Deposit Request',submitDeposit:'Verify Receipt & Submit',
-    depositHelp:'Check.et verifies receipt links or payment text. Wallet credit requires a matching amount and approved receiving account. eBirr is not currently supported by its API.',
+    depositHelp:'Check.et verifies supported receipt links or payment text. Wallet credit requires a confirmed transaction, exact amount, ETB currency, and completed payment status. eBirr needs a separate supported verification integration.',
     txTitle:'📜 Transaction History',leaderTitle:'🏆 Leaderboard',
     inviteTitle:'👥 Invite Friends',
     inviteText:'Friends must open your link and press Start to register.',
@@ -456,6 +463,10 @@ async function boot(){
     document.getElementById('refCount').textContent=me.referrals;
     await refreshGame();
     await refreshWallet();
+    try{
+      const paymentMethods=await fetch('/api/public-payment-methods').then(r=>r.ok?r.json():({}));
+      mpesaReceivers=Array.isArray(paymentMethods.mpesa_receivers)?paymentMethods.mpesa_receivers:[];
+    }catch(e){mpesaReceivers=[];}
     showDepositDetails();updateWithdrawDestination();
     await refreshLeaders();
     applyLang();
@@ -627,11 +638,14 @@ async function deposit(){
     const amount=Number(document.getElementById('amount').value);
     const reference=document.getElementById('reference').value.trim();
     const message=document.getElementById('paymentMessage').value.trim();
+    const provider=document.getElementById('provider').value;
+    const accountNumber=document.getElementById('payerPhone')?.value.trim()||'';
     if(!amount||amount<=0)throw Error('Enter the exact amount you deposited.');
     if(message.length<8)throw Error('Paste the official receipt link or complete payment confirmation SMS first.');
+    if(provider==='cbe_birr'&&accountNumber.replace(/\D/g,'').length<9)throw Error('Enter the phone number used to make the CBE Birr payment.');
     const result=await api('/api/deposits',{
       method:'POST',
-      body:JSON.stringify({provider:document.getElementById('provider').value,amount,reference:reference||null,message})
+      body:JSON.stringify({provider,amount,reference:reference||null,message,account_number:provider==='cbe_birr'?accountNumber:null})
     });
     msg(result.message || `Deposit request #${result.id} submitted. Status: ${String(result.status||'pending').toUpperCase()}.`);
     document.getElementById('paymentMessage').value='';
@@ -655,8 +669,21 @@ function showDepositDetails(){
  const p=document.getElementById('provider').value;
  document.querySelectorAll('[data-provider-brand]').forEach(b=>b.classList.toggle('active',b.dataset.providerBrand===p));
  const host=document.getElementById('depositDetails');
+ const payerPhoneWrap=document.getElementById('payerPhoneWrap');
+ if(payerPhoneWrap)payerPhoneWrap.classList.toggle('hidden',p!=='cbe_birr');
+ if(p!=='cbe_birr'&&document.getElementById('payerPhone'))document.getElementById('payerPhone').value='';
  if(p==='mpesa'){
-  host.innerHTML='<div class="notice">M-Pesa receiving details have not been configured yet. Do not send money until the owner confirms the recipient.</div>';
+  host.innerHTML=mpesaReceivers.length
+   ? '<div class="notice">Send only to one of these configured M-Pesa receiving numbers, then paste the official payment confirmation below.</div>'+mpesaReceivers.map(n=>`<div class="provider-row"><div class="provider-logo">M</div><div class="details"><b>M-Pesa receiving number</b><div class="muted small">${esc(n)}</div></div><button class="copy-small" onclick="copyValue('${esc(n)}')">Copy</button></div>`).join('')
+   : '<div class="notice">M-Pesa receiving numbers are not configured on the server. Set MPESA_RECEIVER_NUMBERS in Render before accepting M-Pesa deposits.</div>';
+  return;
+ }
+ if(p==='cbe_birr'){
+  host.innerHTML='<div class="notice">CBE Birr receipt verification requires the payer phone number. Enter it below. Confirm the correct receiving account before sending money.</div>';
+  return;
+ }
+ if(p==='ebirr'){
+  host.innerHTML='<div class="notice">eBirr is not currently supported by the configured Check.et verification API. This app cannot automatically credit eBirr deposits until an official verification integration is configured.</div>';
   return;
  }
  const phoneRecipients=depositRecipients.filter(x=>x.provider==='Phone recipient');
