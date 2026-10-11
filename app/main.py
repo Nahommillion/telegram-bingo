@@ -379,7 +379,7 @@ def _checket_verify_sync(payload):
            "Authorization":f"Bearer {CHECK_ET_API_KEY}","User-Agent":"CartelaBingo/1.0"},
   method="POST"
  )
- with urllib.request.urlopen(req,timeout=15) as resp:
+ with urllib.request.urlopen(req,timeout=45) as resp:
   return json.loads(resp.read(200000).decode("utf-8"))
 
 async def _checket_verify(payload):
