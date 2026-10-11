@@ -1,688 +1,756 @@
-import os,json,asyncio,random,hmac,hashlib,urllib.parse,time,secrets,logging,math,re,urllib.request,urllib.error,html
-from contextlib import asynccontextmanager
-from pathlib import Path
-from decimal import Decimal
-from typing import Optional
-from fastapi import FastAPI,HTTPException,Header,Request,WebSocket,WebSocketDisconnect
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel,Field
-from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import create_async_engine
-from telegram import Update,KeyboardButton,ReplyKeyboardMarkup,WebAppInfo,InlineKeyboardMarkup,InlineKeyboardButton
-from telegram.ext import Application,CommandHandler,MessageHandler,ContextTypes,filters
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-logger=logging.getLogger("cartela_bingo")
-BOT=os.getenv("TELEGRAM_BOT_TOKEN","").strip(); DB=os.getenv("DATABASE_URL","").strip()
-WEB=os.getenv("WEB_APP_URL","https://telegram-bingo-zq2q.onrender.com/app").strip()
-SUPPORT=os.getenv("SUPPORT_URL","").strip(); PAYKEY=os.getenv("PAYMENT_INGEST_API_KEY","").strip(); OWNER_ID=os.getenv("PLATFORM_OWNER_TELEGRAM_ID","").strip()
-STATIC=Path(__file__).parent/"static"; STATIC.mkdir(exist_ok=True)
-engine=bot=None; ticker=None; lock=asyncio.Lock()
-g={"id":1,"status":"waiting","seconds":30,"called":[],"players":{},"winner":None,"seq":[],"last":0,"lobby_started_at":None,"finished_at_ts":0}
-PROVIDERS={"telebirr","cbe_birr","ebirr","cbe_bank","mpesa"}
-def dsn(x):
- if x.startswith("postgres://"): return x.replace("postgres://","postgresql+asyncpg://",1)
- if x.startswith("postgresql://") and not x.startswith("postgresql+asyncpg://"): return x.replace("postgresql://","postgresql+asyncpg://",1)
- return x
-async def dbinit():
- global engine
- if not DB: raise RuntimeError("Set DATABASE_URL in Render.")
- engine=create_async_engine(dsn(DB),pool_pre_ping=True)
- qs=[
- "CREATE TABLE IF NOT EXISTS bingo_users(telegram_id BIGINT PRIMARY KEY,username TEXT,display_name TEXT,language VARCHAR(5) DEFAULT 'en',phone_number TEXT,phone_verified BOOLEAN DEFAULT FALSE,created_at TIMESTAMPTZ DEFAULT NOW())",
-  "ALTER TABLE bingo_users ADD COLUMN IF NOT EXISTS phone_number TEXT",
-  "ALTER TABLE bingo_users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE",
- "CREATE TABLE IF NOT EXISTS bingo_wallets(telegram_id BIGINT PRIMARY KEY REFERENCES bingo_users(telegram_id),balance NUMERIC(14,2) DEFAULT 0,updated_at TIMESTAMPTZ DEFAULT NOW())",
- "CREATE TABLE IF NOT EXISTS bingo_transactions(id BIGSERIAL PRIMARY KEY,telegram_id BIGINT,transaction_type TEXT,amount NUMERIC(14,2),status TEXT DEFAULT 'pending',description TEXT,external_reference TEXT UNIQUE,created_at TIMESTAMPTZ DEFAULT NOW())",
- "CREATE TABLE IF NOT EXISTS bingo_referrals(id BIGSERIAL PRIMARY KEY,referrer_telegram_id BIGINT,referred_telegram_id BIGINT UNIQUE,created_at TIMESTAMPTZ DEFAULT NOW())",
- "ALTER TABLE bingo_referrals ADD COLUMN IF NOT EXISTS referrer_telegram_id BIGINT",
- "CREATE TABLE IF NOT EXISTS deposit_requests(id BIGSERIAL PRIMARY KEY,telegram_id BIGINT,provider TEXT,amount NUMERIC(14,2),reference TEXT,status TEXT DEFAULT 'pending',created_at TIMESTAMPTZ DEFAULT NOW(),verified_at TIMESTAMPTZ)",
-  "ALTER TABLE deposit_requests ADD COLUMN IF NOT EXISTS payment_message TEXT",
-  "ALTER TABLE deposit_requests ADD COLUMN IF NOT EXISTS parsed_message_amount NUMERIC(14,2)",
-  "CREATE TABLE IF NOT EXISTS withdrawal_requests(id BIGSERIAL PRIMARY KEY,telegram_id BIGINT NOT NULL,provider TEXT NOT NULL,amount NUMERIC(14,2) NOT NULL,destination TEXT NOT NULL,status TEXT DEFAULT 'pending',created_at TIMESTAMPTZ DEFAULT NOW(),processed_at TIMESTAMPTZ)",
- "CREATE TABLE IF NOT EXISTS payment_records(id BIGSERIAL PRIMARY KEY,provider TEXT,external_reference TEXT UNIQUE,amount NUMERIC(14,2),payer_reference TEXT,memo TEXT,matched_request_id BIGINT,created_at TIMESTAMPTZ DEFAULT NOW())",
- "CREATE TABLE IF NOT EXISTS bingo_games(id BIGSERIAL PRIMARY KEY,status TEXT,created_at TIMESTAMPTZ DEFAULT NOW(),started_at TIMESTAMPTZ,finished_at TIMESTAMPTZ,winner_telegram_id BIGINT,called_numbers JSONB DEFAULT '[]'::jsonb)",
- "CREATE TABLE IF NOT EXISTS bingo_game_players(game_id BIGINT,telegram_id BIGINT,cartela_number INT,cartela JSONB,stake NUMERIC(14,2) DEFAULT 0,PRIMARY KEY(game_id,telegram_id),UNIQUE(game_id,cartela_number))",
- "ALTER TABLE bingo_games ADD COLUMN IF NOT EXISTS lobby_started_at TIMESTAMPTZ",
- "CREATE TABLE IF NOT EXISTS bingo_game_entries(game_id BIGINT NOT NULL,telegram_id BIGINT NOT NULL,cartela_number INT NOT NULL,cartela JSONB NOT NULL,stake NUMERIC(14,2) NOT NULL DEFAULT 30,created_at TIMESTAMPTZ DEFAULT NOW(),PRIMARY KEY(game_id,cartela_number),UNIQUE(game_id,telegram_id,cartela_number))",
- "CREATE TABLE IF NOT EXISTS bingo_platform_wallet(id INT PRIMARY KEY DEFAULT 1 CHECK(id=1),balance NUMERIC(14,2) NOT NULL DEFAULT 0,updated_at TIMESTAMPTZ DEFAULT NOW())",
- "INSERT INTO bingo_platform_wallet(id,balance) VALUES(1,0) ON CONFLICT(id) DO NOTHING",
- "INSERT INTO bingo_game_entries(game_id,telegram_id,cartela_number,cartela,stake) SELECT game_id,telegram_id,cartela_number,cartela,stake FROM bingo_game_players WHERE TRUE ON CONFLICT(game_id,cartela_number) DO NOTHING"
- ]
- async with engine.begin() as c:
-  for q in qs: await c.execute(text(q))
-  r=await c.execute(text("SELECT id,status,called_numbers,lobby_started_at,started_at,finished_at,winner_telegram_id FROM bingo_games WHERE status IN ('waiting','running') ORDER BY id DESC LIMIT 1")); row=r.first()
-  if row:
-   g.update(id=row[0],status=row[1],called=row[2] or [],lobby_started_at=row[3].timestamp() if row[3] else None,finished_at_ts=0)
-   if g["status"]=="waiting": g["seconds"]=max(0,30-int(time.time()-(g["lobby_started_at"] or time.time()))) if g["lobby_started_at"] else 30
-   else: g["seconds"]=0
-   if g["status"]=="running": g["seq"]=[n for n in range(1,76) if n not in set(g["called"])];random.shuffle(g["seq"]);g["last"]=time.time()
-   pr=await c.execute(text("SELECT p.telegram_id,COALESCE(u.display_name,u.username,'Player'),p.cartela_number,p.cartela,p.stake FROM bingo_game_entries p LEFT JOIN bingo_users u ON u.telegram_id=p.telegram_id WHERE p.game_id=:g"),{"g":g["id"]})
-   for x in pr.fetchall():
-    card=x[3] if isinstance(x[3],list) else json.loads(x[3] or '[]')
-    g["players"][f"{int(x[0])}:{int(x[2])}"] = {"user_id":int(x[0]),"name":x[1],"n":int(x[2]),"card":card,"stake":float(x[4] or 0)}
-  else:
-   g["id"]=(await c.execute(text("INSERT INTO bingo_games(status) VALUES('waiting') RETURNING id"))).scalar_one()
- logger.info("Database initialized; game #%s status=%s players=%s",g["id"],g["status"],len(g["players"]))
-async def reg(tid,username=None,name=None,language="en"):
- async with engine.begin() as c:
-  await c.execute(text("INSERT INTO bingo_users(telegram_id,username,display_name,language) VALUES(:i,:u,:n,:l) ON CONFLICT(telegram_id) DO UPDATE SET username=COALESCE(EXCLUDED.username,bingo_users.username),display_name=COALESCE(EXCLUDED.display_name,bingo_users.display_name)"),{"i":tid,"u":username,"n":name,"l":language})
-  await c.execute(text("INSERT INTO bingo_wallets(telegram_id) VALUES(:i) ON CONFLICT DO NOTHING"),{"i":tid})
-async def langof(i):
- async with engine.connect() as c:return (await c.execute(text("SELECT language FROM bingo_users WHERE telegram_id=:i"),{"i":i})).scalar_one_or_none() or "en"
-async def setlang(i,l):
- async with engine.begin() as c:await c.execute(text("UPDATE bingo_users SET language=:l WHERE telegram_id=:i"),{"l":l,"i":i})
-def kb(l):
- rows=[["🎮 Play Now","💰 Check Balance"],["➕ Make Deposit","🆘 Support"],["📖 Instructions","🏆 Win Patterns"],["✏️ Change Username","👥 Invite Friends"],["🥇 Leaderboard","📜 Transaction History"],["🌐 Change Language"]] if l=="en" else [["🎮 አሁን ይጫወቱ","💰 ቀሪ ሂሳብ"],["➕ ገንዘብ ያስገቡ","🆘 ድጋፍ"],["📖 መመሪያ","🏆 የማሸነፊያ ቅጦች"],["✏️ ስም ይቀይሩ","👥 ጓደኞችን ይጋብዙ"],["🥇 ደረጃ ሰንጠረዥ","📜 የግብይት ታሪክ"],["🌐 ቋንቋ ይቀይሩ"]]
- return ReplyKeyboardMarkup(
-    [[KeyboardButton(x) for x in r] for r in rows],
-    resize_keyboard=True,
-    one_time_keyboard=False,
-    is_persistent=False
-)
-def wel(l):return ("🎉🎱 እንኳን ወደ Cartela Bingo በደህና መጡ!\n🇪🇹 የኢትዮጵያ ቀለሞች • ቢንጎ • ደስታ\n👇 ከታች ያለውን አዝራር ይምረጡ!" if l=="am" else "🎉🎱 Welcome to Cartela Bingo!\n🇪🇹 Ethiopian colors • Bingo • Fun\n👇 Choose an option below!")
-async def sendwel(up,l=None):
- l=l or await langof(up.effective_user.id); p=STATIC/"bingo.PNG"
- if p.exists():
-  try: await up.effective_message.reply_photo(str(p),caption=wel(l),reply_markup=kb(l));return
-  except Exception: logger.exception("Welcome image failed; sending text fallback")
- await up.effective_message.reply_text(wel(l),reply_markup=kb(l))
-async def request_contact(up):
- await up.effective_message.reply_text(
-  "📱 Welcome! Please share your own phone number to register and use Cartela Bingo. Tap the button below.",
-  reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📱 Share my phone number",request_contact=True)]],resize_keyboard=True,one_time_keyboard=True)
- )
-async def contact(up,ctx):
- u=up.effective_user;m=up.effective_message;ct=m.contact
- await reg(u.id,u.username,u.first_name,"am" if (u.language_code or "").startswith("am") else "en")
- if not ct or ct.user_id != u.id:
-  await m.reply_text("For security, please share your own contact using the button below.")
-  await request_contact(up);return
- phone=re.sub(r"[^0-9+]", "", ct.phone_number or "")
- if len(re.sub(r"\D","",phone))<9:
-  await m.reply_text("That phone number does not look valid. Please share your contact again.");await request_contact(up);return
- async with engine.begin() as c:
-  other=(await c.execute(text("SELECT telegram_id FROM bingo_users WHERE RIGHT(COALESCE(phone_number,''),9)=RIGHT(:p,9) AND telegram_id<>:i LIMIT 1"),{"p":phone,"i":u.id})).scalar_one_or_none()
-  if other:
-   await m.reply_text("That phone number is already registered to another Telegram account. Please contact support if this is a mistake.",reply_markup=kb(await langof(u.id)));return
-  await c.execute(text("UPDATE bingo_users SET phone_number=:p,phone_verified=TRUE WHERE telegram_id=:i"),{"p":phone,"i":u.id})
- await m.reply_text("✅ Phone number registered successfully.",reply_markup=kb(await langof(u.id)))
- await sendwel(up)
-async def start(up,ctx):
- logger.info("Received /start update")
- u=up.effective_user; await reg(u.id,u.username,u.first_name,"am" if (u.language_code or "").startswith("am") else "en")
- if ctx.args and ctx.args[0].startswith("ref_"):
-  try:
-   r=int(ctx.args[0][4:])
-   if r!=u.id:
-    async with engine.begin() as c:await c.execute(text("INSERT INTO bingo_referrals(referrer_telegram_id,referred_telegram_id) VALUES(:r,:u) ON CONFLICT(referred_telegram_id) DO NOTHING"),{"r":r,"u":u.id})
-  except ValueError:pass
- async with engine.connect() as c:
-  phone=(await c.execute(text("SELECT phone_number FROM bingo_users WHERE telegram_id=:i"),{"i":u.id})).scalar_one_or_none()
- if not phone:
-  await request_contact(up);return
- await sendwel(up)
-async def bottext(up,ctx):
- logger.info("Received non-command text update")
- u=up.effective_user;m=up.effective_message;s=(m.text or "").strip();await reg(u.id,u.username,u.first_name);l=await langof(u.id)
- async with engine.connect() as c:
-  phone=(await c.execute(text("SELECT phone_number FROM bingo_users WHERE telegram_id=:i"),{"i":u.id})).scalar_one_or_none()
- if not phone:
-  await request_contact(up);return
- if ctx.user_data.get("rename"):
-  async with engine.begin() as c:await c.execute(text("UPDATE bingo_users SET display_name=:n WHERE telegram_id=:i"),{"n":s[:100],"i":u.id})
-  ctx.user_data["rename"]=False;await m.reply_text("✅ Name updated.",reply_markup=kb(l));return
- M={"🎮 Play Now":"play","🎮 አሁን ይጫወቱ":"play","💰 Check Balance":"balance","💰 ቀሪ ሂሳብ":"balance","➕ Make Deposit":"deposit","➕ ገንዘብ ያስገቡ":"deposit","🆘 Support":"support","🆘 ድጋፍ":"support","📖 Instructions":"help","📖 መመሪያ":"help","🏆 Win Patterns":"patterns","🏆 የማሸነፊያ ቅጦች":"patterns","✏️ Change Username":"rename","✏️ ስም ይቀይሩ":"rename","👥 Invite Friends":"invite","👥 ጓደኞችን ይጋብዙ":"invite","🥇 Leaderboard":"leaders","🥇 ደረጃ ሰንጠረዥ":"leaders","📜 Transaction History":"history","📜 የግብይት ታሪክ":"history","🌐 Change Language":"language","🌐 ቋንቋ ይቀይሩ":"language"}
- a=M.get(s)
- if a=="play":await m.reply_text("🎮 Open Mini App",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Open Cartela Bingo",web_app=WebAppInfo(url=WEB))]]))
- elif a=="balance":
-  async with engine.connect() as c:b=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i"),{"i":u.id})).scalar_one_or_none() or 0
-  await m.reply_text(f"💰 {b} Birr",reply_markup=kb(l))
- elif a=="deposit":await m.reply_text("Create a request in Wallet. Balance is credited only after a trusted payment record matches.",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💳 Open Wallet",web_app=WebAppInfo(url=WEB+"?tab=wallet"))]]))
- elif a=="support":await m.reply_text(SUPPORT or "Support contact not configured.",reply_markup=kb(l))
- elif a=="help":await m.reply_text("Choose a cartela, join the lobby, watch numbers marked automatically, then press BINGO. The server verifies the claim.",reply_markup=kb(l))
- elif a=="patterns":await m.reply_text("🏆 Horizontal, vertical, or diagonal line. Center is free.",reply_markup=kb(l))
- elif a=="rename":ctx.user_data["rename"]=True;await m.reply_text("Send your display name.")
- elif a=="invite":
-  me=await ctx.bot.get_me();await m.reply_text(f"👥 Your personal invite link:\nhttps://t.me/{me.username}?start=ref_{u.id}",reply_markup=kb(l))
- elif a=="language":await setlang(u.id,"am" if l=="en" else "en");await sendwel(up,"am" if l=="en" else "en")
- elif a in ("leaders","history"):
-  async with engine.connect() as c:
-   if a=="leaders":r=await c.execute(text("SELECT COALESCE(NULLIF(MAX(u.display_name),''),NULLIF(MAX(u.username),''),'Player'),COUNT(DISTINCT g.id) FROM bingo_games g JOIN bingo_users u ON u.telegram_id=g.winner_telegram_id WHERE g.winner_telegram_id IS NOT NULL GROUP BY u.telegram_id ORDER BY COUNT(DISTINCT g.id) DESC LIMIT 10"));rows=r.fetchall();out="🏆 Leaderboard\n"+("\n".join(f"{i+1}. {x[0]} — {x[1]}" for i,x in enumerate(rows)) if rows else "No winners yet.")
-   else:r=await c.execute(text("SELECT transaction_type,amount,status FROM bingo_transactions WHERE telegram_id=:i ORDER BY id DESC LIMIT 10"),{"i":u.id});rows=r.fetchall();out="📜 Transactions\n"+("\n".join(f"{x[0]} · {x[1]} · {x[2]}" for x in rows) if rows else "No transactions yet.")
-  await m.reply_text(out,reply_markup=kb(l))
-def auth(init):
- if not BOT or not init:raise HTTPException(401,"Open Mini App inside Telegram.")
- try:
-  d=dict(urllib.parse.parse_qsl(init,keep_blank_values=True));h=d.pop("hash");check="\n".join(f"{k}={v}" for k,v in sorted(d.items()));secret=hmac.new(b"WebAppData",BOT.encode(),hashlib.sha256).digest()
-  if not hmac.compare_digest(hmac.new(secret,check.encode(),hashlib.sha256).hexdigest(),h) or abs(time.time()-int(d.get("auth_date","0")))>86400:raise ValueError()
-  return json.loads(d["user"])
- except Exception:raise HTTPException(401,"Telegram authentication failed. Reopen the app.")
-async def who(req):
- u=auth(req.headers.get("X-Telegram-Init-Data",""));await reg(int(u["id"]),u.get("username"),u.get("first_name"))
- async with engine.connect() as c:
-  phone=(await c.execute(text("SELECT phone_number FROM bingo_users WHERE telegram_id=:i"),{"i":int(u["id"])})).scalar_one_or_none()
- if not phone:raise HTTPException(403,"Please register your phone number with the bot first: send /start and share your own contact.")
- return u
-def newcard():
- cols=[random.sample(range(a,b+1),5) for a,b in [(1,15),(16,30),(31,45),(46,60),(61,75)]];g=[[cols[c][r] for c in range(5)] for r in range(5)];g[2][2]=0;return g
-def winline(card,called):
- m=set(called)|{0};lines=[[(r,c) for c in range(5)] for r in range(5)]+[[(r,c) for r in range(5)] for c in range(5)]+[[(i,i) for i in range(5)],[(i,4-i) for i in range(5)]]
- return next(([[r,c] for r,c in ln] for ln in lines if all(card[r][c] in m for r,c in ln)),None)
-async def loop():
- while True:
-  await asyncio.sleep(1)
-  try:
-   async with lock:
-    now=time.time()
-    if g["status"]=="waiting" and g["players"]:
-     if g["lobby_started_at"] is None: g["lobby_started_at"]=now
-     g["seconds"]=max(0,math.ceil(30-(now-g["lobby_started_at"])))
-     if now-g["lobby_started_at"]>=30:
-      g["status"]="running";g["seconds"]=0;g["seq"]=[n for n in range(1,76) if n not in set(g["called"])];random.shuffle(g["seq"]);g["last"]=now
-      async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":g["id"]})
-      logger.info("Game #%s started with %s players",g["id"],len({p.get("user_id") for p in g["players"].values()}))
-    elif g["status"]=="running" and now-g["last"]>=1.25:
-     if g["seq"]:
-      g["called"].append(g["seq"].pop(0));g["last"]=now
-      async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET called_numbers=CAST(:n AS jsonb) WHERE id=:i AND status='running'"),{"n":json.dumps(g["called"]),"i":g["id"]})
-     else:
-      g["status"]="finished";g["finished_at_ts"]=now
-      async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),called_numbers=CAST(:n AS jsonb) WHERE id=:i"),{"n":json.dumps(g["called"]),"i":g["id"]})
-    elif g["status"]=="finished" and now-(g.get("finished_at_ts") or now)>=5:
-     async with engine.begin() as c: gid=(await c.execute(text("INSERT INTO bingo_games(status) VALUES('waiting') RETURNING id"))).scalar_one()
-     g.update(id=gid,status="waiting",seconds=30,called=[],players={},winner=None,seq=[],last=0,lobby_started_at=None,finished_at_ts=0)
-     logger.info("New lobby opened: game #%s",gid)
-  except asyncio.CancelledError: raise
-  except Exception: logger.exception("Game loop error")
-@asynccontextmanager
-async def lifespan(app):
- global bot,ticker
- await dbinit();ticker=asyncio.create_task(loop())
- if BOT:
-  bot=Application.builder().token(BOT).build();bot.add_handler(CommandHandler("start",start));bot.add_handler(MessageHandler(filters.CONTACT,contact));bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND,bottext));bot.add_error_handler(telegram_error_handler);await bot.initialize();await bot.bot.delete_webhook(drop_pending_updates=False);await bot.start()
-  if bot.updater: await bot.updater.start_polling(drop_pending_updates=False)
-  logger.info("Telegram polling started successfully")
- else: logger.error("TELEGRAM_BOT_TOKEN is missing")
- yield
- if ticker:ticker.cancel()
- if bot:
-  if bot.updater:await bot.updater.stop()
-  await bot.stop();await bot.shutdown()
- if engine:await engine.dispose()
-async def telegram_error_handler(update,context): logger.error("Telegram update processing failed",exc_info=context.error)
-app=FastAPI(title="Cartela Bingo",lifespan=lifespan);app.mount("/static",StaticFiles(directory=str(STATIC)),name="static")
-@app.get("/")
-async def root():return {"app":"Cartela Bingo","mini_app":"/app","health":"/health"}
-@app.get("/app",response_class=HTMLResponse)
-async def mini():return HTMLResponse((STATIC/"index.html").read_text(encoding="utf-8"))
-@app.get("/health")
-async def health():return {"status":"ok"}
-@app.get("/health/database")
-async def healthdb():
- async with engine.connect() as c:await c.execute(text("SELECT 1"))
- return {"status":"connected"}
-@app.get("/api/me")
-async def me(req:Request):
- u=await who(req);i=int(u["id"])
- async with engine.connect() as c:
-  row=(await c.execute(text("SELECT display_name,language,phone_number FROM bingo_users WHERE telegram_id=:i"),{"i":i})).first();bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i"),{"i":i})).scalar_one_or_none() or 0;refs=(await c.execute(text("SELECT COUNT(*) FROM bingo_referrals WHERE referrer_telegram_id=:i"),{"i":i})).scalar_one()
- uname=(await bot.bot.get_me()).username if bot else "YOUR_BOT_USERNAME"
- return {"id":i,"name":(row[0] if row else None) or u.get("first_name","Player"),"username":u.get("username"),"language":row[1] if row else "en","phone_number":row[2] if row else None,"balance":float(bal),"referrals":refs,"referral_link":f"https://t.me/{uname}?start=ref_{i}"}
-@app.post("/api/language")
-async def language(req:Request):
- u=await who(req);l=(await req.json()).get("language")
- if l not in ("en","am"):raise HTTPException(400,"Invalid language")
- await setlang(int(u["id"]),l);return {"ok":True}
-@app.get("/api/game")
-async def getgame(req:Request):
- u=await who(req);uid=int(u["id"])
- async with lock:
-  # PostgreSQL is the shared source of truth for cartela reservations. Refresh on
-  # every poll so all players see reservations made by other users immediately.
-  async with engine.connect() as c:
-   state=(await c.execute(text("SELECT status,called_numbers,lobby_started_at,winner_telegram_id FROM bingo_games WHERE id=:g"),{"g":g["id"]})).first()
-   if state:
-    g["status"]=state[0]
-    g["called"]=state[1] or []
-    if state[2] and g["lobby_started_at"] is None:g["lobby_started_at"]=state[2].timestamp()
-    pr=await c.execute(text("SELECT p.telegram_id,COALESCE(NULLIF(u.display_name,''),NULLIF(u.username,''),'Player'),p.cartela_number,p.cartela,p.stake FROM bingo_game_entries p LEFT JOIN bingo_users u ON u.telegram_id=p.telegram_id WHERE p.game_id=:g ORDER BY p.cartela_number"),{"g":g["id"]})
-    fresh={}
-    for x in pr.fetchall():
-     card=x[3] if isinstance(x[3],list) else json.loads(x[3] or '[]')
-     fresh[f"{int(x[0])}:{int(x[2])}"]={"user_id":int(x[0]),"name":x[1],"n":int(x[2]),"card":card,"stake":float(x[4] or 0)}
-    g["players"]=fresh
-  if g["status"]=="waiting" and g["lobby_started_at"] is not None:
-   g["seconds"]=max(0,math.ceil(30-(time.time()-g["lobby_started_at"])))
-  entries=list(g["players"].values())
-  mine=[{"cartela":p["card"],"cartela_number":p["n"],"stake":p["stake"]} for p in entries if p.get("user_id")==uid]
-  users={p.get("user_id") for p in entries}
-  total_bets=sum((Decimal(str(p["stake"])) for p in entries),Decimal("0.00"))
-  prize=(total_bets*Decimal("0.80")).quantize(Decimal("0.01"))
-  return {"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"players":[{"telegram_id":p.get("user_id"),"name":p["name"],"cartela_number":p["n"],"stake":p["stake"]} for p in entries],"player_count":len(users),"total_bets":float(total_bets),"prize_amount":float(prize),"owner_share":float((total_bets-prize).quantize(Decimal("0.01"))),"my_cartelas":mine,"my_cartela":mine[0]["cartela"] if mine else None,"my_cartela_number":mine[0]["cartela_number"] if mine else None,"winner":g["winner"]}
-class Join(BaseModel):
- cartela_numbers:list[int]=Field(default_factory=list)
- cartela_number:Optional[int]=Field(default=None,ge=1,le=200)
- stake:Decimal=Field(ge=Decimal("30"),le=Decimal("1000"))
-@app.post("/api/game/join")
-async def join(b:Join,req:Request):
- u=await who(req);uid=int(u["id"])
- nums=list(dict.fromkeys(b.cartela_numbers or ([b.cartela_number] if b.cartela_number else [])))
- if not nums: raise HTTPException(400,"Select at least one cartela.")
- if len(nums)>200 or any(n<1 or n>200 for n in nums): raise HTTPException(400,"Cartela numbers must be between 1 and 200.")
- total=(b.stake*len(nums)).quantize(Decimal("0.01"))
- async with lock:
-  if g["status"]!="waiting": raise HTTPException(409,"Lobby closed; wait for the next game.")
-  if g["lobby_started_at"] is not None and time.time()-g["lobby_started_at"]>=30: raise HTTPException(409,"The 30-second lobby has closed. Please join the next game.")
-  already={p["n"] for p in g["players"].values() if p.get("user_id")==uid}
-  nums=[n for n in nums if n not in already]
-  if not nums: return {"ok":True,"cartelas":[{"cartela_number":p["n"],"cartela":p["card"]} for p in g["players"].values() if p.get("user_id")==uid],"lobby_seconds":g["seconds"]}
-  total=(b.stake*len(nums)).quantize(Decimal("0.01"))
-  cards={n:newcard() for n in nums}
-  try:
-   async with engine.begin() as c:
-    game_row=(await c.execute(text("SELECT status,lobby_started_at FROM bingo_games WHERE id=:g FOR UPDATE"),{"g":g["id"]})).first()
-    if not game_row or game_row[0]!="waiting": raise HTTPException(409,"Lobby closed; wait for the next game.")
-    params={"g":g["id"]}; placeholders=[]
-    for ix,n in enumerate(nums):params[f"n{ix}"]=n;placeholders.append(f":n{ix}")
-    taken=(await c.execute(text("SELECT cartela_number FROM bingo_game_entries WHERE game_id=:g AND cartela_number IN ("+",".join(placeholders)+")"),params)).scalars().all()
-    if taken: raise HTTPException(409,"Cartela(s) just taken: "+", ".join(map(str,taken))+". Refresh and choose available numbers.")
-    bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i FOR UPDATE"),{"i":uid})).scalar_one_or_none() or 0
-    pending=(await c.execute(text("SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE telegram_id=:i AND status='pending'"),{"i":uid})).scalar_one() or 0
-    available=Decimal(str(bal))-Decimal(str(pending))
-    if available<total: raise HTTPException(402,f"Insufficient available balance. {len(nums)} cartela(s) at {b.stake} Birr each cost {total} Birr.")
-    await c.execute(text("UPDATE bingo_wallets SET balance=balance-:a,updated_at=NOW() WHERE telegram_id=:i"),{"a":total,"i":uid})
-    await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:i,'bet',:a,'verified',:d)"),{"i":uid,"a":-total,"d":f"Bingo bet: {len(nums)} cartela(s) at {b.stake} Birr each"})
-    for n,card in cards.items():
-     await c.execute(text("INSERT INTO bingo_game_entries(game_id,telegram_id,cartela_number,cartela,stake) VALUES(:g,:i,:n,CAST(:c AS jsonb),:s)"),{"g":g["id"],"i":uid,"n":n,"c":json.dumps(card),"s":b.stake})
-    await c.execute(text("UPDATE bingo_games SET lobby_started_at=COALESCE(lobby_started_at,NOW()) WHERE id=:g"),{"g":g["id"]})
-  except IntegrityError:
-   raise HTTPException(409,"A selected cartela was just taken. Refresh and choose again.")
-  for n,card in cards.items():g["players"][f"{uid}:{n}"]={"user_id":uid,"name":u.get("first_name","Player"),"n":n,"card":card,"stake":float(b.stake)}
-  if g["lobby_started_at"] is None:g["lobby_started_at"]=time.time()
-  g["seconds"]=max(0,math.ceil(30-(time.time()-g["lobby_started_at"])))
-  return {"ok":True,"cartelas":[{"cartela_number":n,"cartela":cards[n]} for n in nums],"lobby_seconds":g["seconds"],"total_stake":float(total)}
-@app.post("/api/game/claim")
-async def claim(req:Request):
- u=await who(req);uid=int(u["id"])
- try:
-  body=await req.json();number=int(body.get("cartela_number"));marked={int(x) for x in body.get("marked",[]) if str(x).isdigit()}
- except Exception:raise HTTPException(400,"Choose the cartela you want to claim with.")
- async with lock:
-  if g["status"]!="running":raise HTTPException(409,"Game is not running.")
-  p=g["players"].get(f"{uid}:{number}")
-  if not p:raise HTTPException(400,"That cartela is not yours in this game.")
-  line=winline(p["card"],g["called"])
-  if not line:raise HTTPException(400,"No valid line on this cartela yet.")
-  valid_marked=(marked & set(g["called"])) | {0}
-  lines=[[(r,c) for c in range(5)] for r in range(5)]+[[(r,c) for r in range(5)] for c in range(5)]+[[(i,i) for i in range(5)],[(i,4-i) for i in range(5)]]
-  marked_line=next(([[r,c] for r,c in ln] for ln in lines if all(p["card"][r][c] in valid_marked for r,c in ln)),None)
-  if not marked_line:raise HTTPException(400,"Mark every called number in a complete horizontal, vertical, or diagonal line first.")
-  if g["winner"]:raise HTTPException(409,"Another player already won.")
-  entries=list(g["players"].values());pot=sum((Decimal(str(x["stake"])) for x in entries),Decimal("0.00"))
-  prize=(pot*Decimal("0.80")).quantize(Decimal("0.01"));commission=(pot-prize).quantize(Decimal("0.01"))
-  g["winner"]={"telegram_id":uid,"name":p["name"],"cartela_number":p["n"],"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"commission":float(commission)};g["status"]="finished";g["finished_at_ts"]=time.time()
-  async with engine.begin() as c:
-   # Atomic conditional update prevents two simultaneous BINGO claims from
-   # paying the same round twice, including across app workers/restarts.
-   won=(await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),winner_telegram_id=:u,called_numbers=CAST(:n AS jsonb) WHERE id=:g AND status='running' AND winner_telegram_id IS NULL RETURNING id"),{"u":uid,"n":json.dumps(g["called"]),"g":g["id"]})).scalar_one_or_none()
-   if won is None:
-    raise HTTPException(409,"This game has already been won. Refresh for the result.")
-   if prize:
-    txid=(await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'win',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{"u":uid,"a":prize,"d":f"Bingo prize (80% of {pot} Birr total bets)","r":f"bingo:game:{g['id']}:winner"})).scalar_one_or_none()
-    if txid is not None:
-     await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":prize,"u":uid})
-   if commission and OWNER_ID.isdigit():
-    owner=int(OWNER_ID)
-    await c.execute(text("INSERT INTO bingo_users(telegram_id,display_name) VALUES(:i,'Platform Owner') ON CONFLICT(telegram_id) DO NOTHING"),{"i":owner})
-    await c.execute(text("INSERT INTO bingo_wallets(telegram_id) VALUES(:i) ON CONFLICT(telegram_id) DO NOTHING"),{"i":owner})
-    await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:i"),{"a":commission,"i":owner})
-    await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:i,'platform_commission',:a,'verified',:d)"),{"i":owner,"a":commission,"d":f"20% platform commission from game #{g['id']}"})
-   elif commission:
-    await c.execute(text("UPDATE bingo_platform_wallet SET balance=balance+:a,updated_at=NOW() WHERE id=1"),{"a":commission})
-  return {"ok":True,"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"platform_commission":float(commission)}
-@app.get("/api/wallet")
-async def wallet(req:Request):
- u=await who(req);i=int(u["id"])
- async with engine.connect() as c:
-  bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i"),{"i":i})).scalar_one_or_none() or 0
-  ds=(await c.execute(text("SELECT id,provider,amount,reference,status,created_at FROM deposit_requests WHERE telegram_id=:i ORDER BY id DESC LIMIT 20"),{"i":i})).fetchall()
-  ws=(await c.execute(text("SELECT id,provider,amount,destination,status,created_at FROM withdrawal_requests WHERE telegram_id=:i ORDER BY id DESC LIMIT 20"),{"i":i})).fetchall()
-  pending=(await c.execute(text("SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE telegram_id=:i AND status='pending'"),{"i":i})).scalar_one()
-  ts=(await c.execute(text("SELECT transaction_type,amount,status,description,created_at FROM bingo_transactions WHERE telegram_id=:i ORDER BY id DESC LIMIT 20"),{"i":i})).fetchall()
- return {"balance":float(bal),"available_balance":float(Decimal(str(bal))-Decimal(str(pending or 0))),"deposits":[{"id":x[0],"provider":x[1],"amount":float(x[2]),"reference":x[3],"status":x[4],"created_at":x[5].isoformat()} for x in ds],"withdrawals":[{"id":x[0],"provider":x[1],"amount":float(x[2]),"destination":x[3],"status":x[4],"created_at":x[5].isoformat()} for x in ws],"transactions":[{"type":x[0],"amount":float(x[1]),"status":x[2],"description":x[3],"created_at":x[4].isoformat()} for x in ts]}
-class Dep(BaseModel):
- provider:str
- amount:Decimal=Field(gt=0,le=Decimal("1000000"))
- message:Optional[str]=Field(default=None,max_length=5000)
- reference:Optional[str]=Field(default=None,max_length=300)
 
-def normalize_digits(value:str)->str:
- # Normalize Ethiopic/Arabic-Indic numerals if a provider uses them.
- trans={}
- for base in (0x0660,0x06F0):
-  for i in range(10): trans[chr(base+i)]=str(i)
- return (value or "").translate(str.maketrans(trans))
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Cartela Bingo</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:#071525;--panel:#102b40;--panel2:#173b50;--green:#12c879;--yellow:#ffd447;--red:#ef4055;--gold:#f8c947;--muted:#a8bfce;--white:#f7fbff}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 60%);font-family:system-ui,Arial;color:var(--white);padding-bottom:82px}
+.float-bg{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0;opacity:.17}.float-bg span{position:absolute;font-size:28px;animation:drift 16s linear infinite}.float-bg span:nth-child(1){left:4%;top:18%}.float-bg span:nth-child(2){left:82%;top:12%;animation-delay:-4s}.float-bg span:nth-child(3){left:90%;top:55%;animation-delay:-8s}.float-bg span:nth-child(4){left:13%;top:72%;animation-delay:-12s}.float-bg span:nth-child(5){left:65%;top:86%;animation-delay:-6s}.float-bg span:nth-child(6){left:48%;top:34%;animation-delay:-10s}@keyframes drift{0%{transform:translateY(10vh) rotate(0deg)}50%{transform:translateY(-7vh) rotate(180deg)}100%{transform:translateY(10vh) rotate(360deg)}}.wrap,.bottom,.flag{position:relative;z-index:1}.flag{height:5px;background:linear-gradient(90deg,#078844 0 33.3%,#ffd447 33.3% 66.6%,#ed3346 66.6%)}
+.wrap{max-width:560px;margin:auto;padding:14px}
+.top{display:flex;justify-content:space-between;align-items:center}
+.brand{display:flex;gap:10px;align-items:center}
+.mark{width:46px;height:46px;border-radius:15px;display:grid;place-items:center;font-size:26px;background:linear-gradient(135deg,#078844,#ffd447 55%,#ed3346);box-shadow:0 0 25px #00c87955}
+.brand h1{font-size:18px;margin:0}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+.lang,.secondary{background:#183a4d;border:1px solid #2a5c6d;border-radius:13px;padding:10px;color:white}
+.hero{position:relative;overflow:hidden;margin:16px 0;padding:20px;border:1px solid #34735f;border-radius:24px;background:linear-gradient(130deg,#074c38,#0b263b 58%,#5a2030);box-shadow:0 12px 35px #0005}
+.hero h2{font-size:24px;margin:0 0 8px}
+.hero p{max-width:75%;line-height:1.45;margin:0;color:#d5eae1}
+.balls{position:absolute;right:10px;bottom:14px;display:flex;gap:4px;transform:rotate(-12deg)}
+.ball{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:#081525;font-weight:1000;border:3px solid #ffffffaa;box-shadow:inset -4px -5px 8px #0003;animation:float 2.5s ease-in-out infinite}
+.ball:nth-child(1){background:#ffd447}
+.ball:nth-child(2){background:#ff5263;animation-delay:-.8s}
+.ball:nth-child(3){background:#32db9b;animation-delay:-1.5s}
+@keyframes float{50%{transform:translateY(-9px)}}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
+.stat,.panel{background:linear-gradient(145deg,#12354a,#0b1f32);border:1px solid #244b60;border-radius:16px;padding:13px}
+.stat span{display:block;font-size:11px;color:var(--muted)}
+.stat strong{display:block;font-size:16px;margin-top:5px}
+.primary,.danger{width:100%;padding:14px;border:0;border-radius:14px;font-weight:900}
+.primary{background:linear-gradient(110deg,#08a95c,#19df8b);color:#042819;box-shadow:0 7px 20px #00bf7040}
+.primary:disabled{opacity:.45}
+.danger{background:linear-gradient(110deg,#bd2443,#ff5263);color:white}
+.title{display:flex;justify-content:space-between;align-items:center;margin:20px 2px 10px}
+.title h3{margin:0;font-size:17px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tile{min-height:94px;text-align:left;padding:14px;border-radius:17px;background:linear-gradient(145deg,#17384d,#10263a);border:1px solid #2a5266;color:white;display:flex;flex-direction:column;justify-content:space-between}
+.tile .emoji{font-size:24px}
+.tile strong{font-size:14px}
+.tile small{color:var(--muted)}
+.screen{display:none}
+.screen.active{display:block}
+.bottom{position:fixed;bottom:0;left:0;right:0;z-index:5;display:grid;grid-template-columns:repeat(5,1fr);max-width:560px;margin:auto;background:#071625f5;border-top:1px solid #25495b;padding:8px 5px calc(8px + env(safe-area-inset-bottom));backdrop-filter:blur(14px)}
+.nav{background:transparent;color:#91aabb;font-size:10px;display:grid;justify-items:center;gap:4px;border:0}
+.nav span{font-size:20px}
+.nav.active{color:var(--gold)}
+.field{width:100%;padding:12px;background:#061727;color:white;border:1px solid #31556b;border-radius:12px;margin:7px 0 12px}
+.cardgrid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;max-height:48vh;overflow:auto;padding:2px}
+.pick{background:#12a968;border:1px solid #65f0b0;border-radius:10px;padding:11px 3px;color:white;font-weight:900;min-height:44px}
+.pick.selected{border:3px solid var(--yellow);background:#22543f;box-shadow:0 0 0 2px #ffd44733}
+.pick.taken{background:#05080c!important;border-color:#30343a!important;color:#78818a!important;opacity:1;filter:none;text-decoration:line-through}
+.pick:disabled{cursor:not-allowed}
+.selection-summary{display:flex;gap:10px;align-items:center;justify-content:space-between;background:#102d40;border:1px solid #2a5c6d;border-radius:12px;padding:10px;margin:10px 0}
+.selection-summary strong{color:var(--yellow)}
+@media(min-width:420px){.cardgrid{grid-template-columns:repeat(8,minmax(0,1fr))}}
+.bhead{display:grid;grid-template-columns:repeat(5,1fr);background:linear-gradient(90deg,#08c879,#ffd447,#ed3346);color:#071525;font-weight:1000;border-radius:7px 7px 0 0;padding:6px 0}
+.card{display:grid;grid-template-columns:repeat(5,1fr);gap:2px;background:#e9f0f4;padding:4px;border-radius:0 0 8px 8px}
+.cell{aspect-ratio:1;display:grid;place-items:center;background:white;color:#142333;border-radius:4px;font-size:clamp(11px,3vw,16px);font-weight:800;border:1px solid #d0d9df}
+.cell.marked{background:#20d78a;color:#052b1b}.mini-card-wrap{max-width:270px;margin:0 auto}.my-card-item{max-width:285px;margin:12px auto;padding:9px;background:#102b40;border:1px solid #31576b;border-radius:13px}.my-card-item .bhead{padding:3px 0;font-size:12px}.my-card-item .card{gap:1px;padding:3px}.my-card-item .cell{font-size:clamp(9px,2.4vw,12px);border-radius:3px}.card-caption{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:6px}.provider-brand-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:10px 0}.provider-brand{min-width:0;background:#0b2032;border:1px solid #294d61;border-radius:12px;padding:10px 4px;color:white;font-weight:900;display:flex;flex-direction:column;align-items:center;gap:5px}.provider-brand.active{border-color:#18db8b;box-shadow:0 0 0 1px #18db8b66;background:#123c32}.provider-brand svg{width:31px;height:25px}.provider-brand img{width:38px;height:30px;object-fit:contain;background:#fff;border-radius:7px;padding:3px}.provider-logo img{width:38px;height:38px;object-fit:contain;background:white;border-radius:9px;padding:3px}.sound-toggle{margin:8px auto 0;display:block;background:#183a4d;border:1px solid #2a5c6d;color:white;border-radius:10px;padding:8px 12px;font-weight:800}.sound-toggle.on{border-color:#12c879;color:#8fffc7}.sms-box{min-height:125px;resize:vertical;white-space:pre-wrap}.provider-brand small{font-size:10px;color:#c8dce8}.brand-fallback{width:38px;height:30px;place-items:center;background:#fff;color:#087b46;border-radius:7px;font-weight:1000;font-size:16px}.cell{cursor:pointer;user-select:none}.cell.uncalled{opacity:.62}.provider-list{display:grid;gap:9px;margin:12px 0}.provider-row{display:flex;align-items:center;gap:10px;background:#0b2032;border:1px solid #294d61;border-radius:13px;padding:10px}.provider-logo{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border-radius:12px;background:linear-gradient(135deg,#078844,#ffd447);color:#061525;font-weight:1000;font-size:13px}.provider-row .details{flex:1;min-width:0}.copy-small{border:1px solid #426779;border-radius:9px;background:#17384d;color:white;padding:8px}.wallet-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:12px 0}.wallet-tab{padding:11px 5px;border-radius:11px;border:1px solid #2a5266;background:#17384d;color:white;font-weight:800}.wallet-tab.active{background:#12a968;color:#06291b;border-color:#65f0b0}.wallet-pane{display:none}.wallet-pane.active{display:block}
+.cell.win{background:#ffd447!important;color:#201800;box-shadow:0 0 0 2px white,0 0 14px #ffd447}
+.number{width:80px;height:80px;margin:14px auto;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 30% 25%,white,#ffd447 32%,#d59a06);border:5px solid white;box-shadow:0 0 0 4px #13c879,0 0 25px #ffd44788;color:#0a1c2a;font-size:30px;font-weight:1000;animation:float 2s infinite}
+.chips{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0}
+.chip{background:#17394c;border:1px solid #2a5b6c;border-radius:20px;padding:5px 8px;font-size:12px}
+.notice{background:#123c32;border:1px solid #22795d;color:#c8ffe8;border-radius:12px;padding:11px;margin:10px 0;font-size:13px}
+.err{background:#4a2029;border-color:#8c3947;color:#ffd9df}
+.hidden{display:none!important}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:11px 0;border-bottom:1px solid #214254}
+.pill{font-size:11px;border-radius:20px;padding:5px 8px;background:#1a4d3b;color:#72f2ba}
+.wide{margin-top:10px}
+.center{text-align:center}
+</style>
+</head>
+<body>
+<div class="float-bg" aria-hidden="true"><span>🎱</span><span>✦</span><span>●</span><span>🎱</span><span>✦</span><span>●</span></div>
+<div class="flag"></div>
+<div class="wrap">
+<header class="top">
+<div class="brand"><div class="mark">🎱</div><div><h1>Cartela Bingo</h1><small class="muted">🇪🇹 Ethiopian Bingo • ቢንጎ</small></div></div>
+<button class="lang" onclick="toggleLang()" id="langBtn">አማ / EN</button>
+</header>
+<div id="notice" class="notice hidden"></div>
 
-def parse_sms_amount(message:str):
- message=normalize_digits(message or "")
- patterns=[
-  r"(?i)(?:amount|paid|payment|received|credited|deposit(?:ed)?|transfer(?:red)?)\s*(?:is|of|:|=)?\s*(?:ETB|Birr|ብር)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:ETB|Birr|ብር)",
-  r"([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*ብር\s*በቀን",
-  r"(?i)(?:ETB|Birr|ብር)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)",
-  r"(?i)([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:ETB|Birr|ብር)"
- ]
- for pattern in patterns:
-  m=re.search(pattern,message)
-  if m:
-   try:return Decimal(m.group(1).replace(',','')).quantize(Decimal('0.01'))
-   except Exception:pass
- return None
+<section class="screen active" id="home">
+<div class="hero"><h2 id="hero">🎉 Welcome to Cartela Bingo!</h2><p id="tagline">Choose a cartela. Follow the numbers. Claim your win!</p><div class="balls"><span class="ball">7</span><span class="ball">23</span><span class="ball">46</span></div></div>
+<div class="stats">
+<div class="stat"><span id="balLabel">YOUR BALANCE</span><strong id="homeBal">0.00 Birr</strong></div>
+<div class="stat"><span id="playersLabel">PLAYERS</span><strong id="homePlayers">0</strong></div>
+<div class="stat"><span>GAME</span><strong id="gameId">#1</strong></div>
+</div>
+<button class="primary" onclick="go('game')" id="play">🎮 Play Bingo Now</button>
+<div class="title"><h3 id="quick">✨ Quick Access</h3></div>
+<div class="grid">
+<button class="tile" onclick="go('wallet')"><span class="emoji">💳</span><strong id="depositTile">Deposit Funds</strong><small>Telebirr • CBE • eBirr</small></button>
+<button class="tile" onclick="go('wallet')"><span class="emoji">💰</span><strong id="walletTile">My Wallet</strong><small>Balance & history</small></button>
+<button class="tile" onclick="go('leaderboard')"><span class="emoji">🏆</span><strong id="leaderTile">Leaderboard</strong><small>Top players</small></button>
+<button class="tile" onclick="go('profile')"><span class="emoji">👤</span><strong id="profileTile">My Profile</strong><small>Language & invite</small></button>
+</div>
+<div class="title"><h3 id="liveTitle">🎱 Live Game</h3><span class="pill" id="status">WAITING</span></div>
+<div class="panel">
+<div class="muted small" id="lobbyHint">Choose a cartela to join the next game.</div>
+<div class="stats"><div><span class="muted small">LOBBY TIMER</span><strong id="homeTimer">00:30</strong></div><div><span class="muted small">PLAYERS</span><strong id="homeCount">0</strong></div><div><span class="muted small">CALLED</span><strong id="homeCalled">0/75</strong></div></div>
+<button class="secondary" style="width:100%" onclick="go('game')" id="openLobby">Open Game Lobby →</button>
+</div>
+</section>
 
-def parse_sms_reference(message:str):
- message=normalize_digits(message or "")
- patterns=[r"(?i)(?:transaction|txn|trans(?:action)?\s*id|reference|ref(?:erence)?\s*(?:no|number|#)?|receipt(?:\s*(?:no|number|#))?)\s*[:#= -]+([A-Z0-9-]{5,})", r"ቁጥርዎ\s*[:：#= -]*([A-Z0-9]{8,14})"]
- for pattern in patterns:
-  m=re.search(pattern,message)
-  if m:return m.group(1).strip()[:200]
- return None
+<section class="screen" id="game">
+<div class="title"><h3 id="gameTitle">🎮 Game Lobby</h3><span class="pill" id="gameStatus">WAITING</span></div>
+<div class="panel center">
+<div class="muted" id="chooseDesc">Choose your cartela and join the next game.</div>
+<div class="number" id="lastNumber">?</div>
+<div class="muted" id="lastLabel" style="font-weight:900;font-size:17px;margin-top:-7px">Waiting for first number</div><button type="button" class="sound-toggle" id="soundToggle" onclick="toggleCallSound()">🔇 Enable called-number sound</button>
+<div class="stats"><div class="stat"><span>STARTS IN</span><strong id="timer">00:30</strong></div><div class="stat"><span>PLAYERS</span><strong id="count">0</strong></div><div class="stat"><span>CALLED</span><strong id="calledCount">0/75</strong></div></div>
+<div class="stats"><div class="stat"><span>TOTAL BETS</span><strong id="totalBets">0.00 Birr</strong></div><div class="stat"><span>WINNER GETS (80%)</span><strong id="prizeAmount">0.00 Birr</strong></div><div class="stat"><span>OWNER (20%)</span><strong id="ownerShare">0.00 Birr</strong></div></div>
+</div>
+<div class="panel"><div class="title"><h3>👥 Taken Cartelas — Live</h3><span class="muted small" id="takenCount">0 taken</span></div><div class="chips" id="takenList">No cartelas taken yet.</div></div>
+<div id="selectArea">
+<div class="title"><h3 id="chooseCard">Choose Your Cartela (1–200)</h3></div>
+<p class="muted small">Green = available. Black = already taken by a player in this round. The board stays visible during the game and refreshes automatically. Select a green number, set your bet, then press Start Game to reserve it.</p>
+<input id="cartelaSearch" class="field" type="number" min="1" max="200" placeholder="Find cartela number (1–200)" oninput="renderChoices()">
+<div class="selection-summary"><span>Selected cartela</span><strong id="selectedCartelaLabel">None</strong></div>
+<label class="small muted" id="stakeLabel">Bet per cartela (minimum 30 Birr)</label>
+<input id="stake" class="field" type="number" min="30" max="1000" step="1" value="30" oninput="updateSelectionSummary()">
+<div class="muted small" id="betSummary">Select cartelas to calculate your total bet.</div>
+<button class="primary" id="startGameBtn" onclick="startSelectedGame()" disabled>🎮 Start Game (30s countdown)</button>
+<div class="title"><span class="muted small">Available cartelas</span><span class="muted small" id="availableCount">200 available</span></div>
+<div class="cardgrid" id="choices"></div>
+</div>
+<div id="playing" class="hidden">
+<div class="title"><h3 id="yourCard">Your Cartela</h3><span class="pill" id="cardNum"></span></div>
+<div class="panel">
+<div id="myCards"></div>
+<div class="chips" id="recent"></div>
+<div id="claimMsg" class="notice hidden"></div>
+</div>
+</div>
+<div class="title"><h3 id="calledTitle">📣 Called Numbers</h3></div>
+<div class="panel"><div class="chips" id="allCalled"></div></div>
+</section>
 
-def extract_telebirr_reference(value:str)->Optional[str]:
- """Accept a raw receipt reference or a URL on the fixed official receipt host only."""
- value=(value or '').strip()
- if not value:return None
- if value.lower().startswith(('https://','http://')):
-  try:
-   u=urllib.parse.urlsplit(value)
-   if u.scheme!='https' or u.hostname!='transactioninfo.ethiotelecom.et' or u.port not in (None,443):return None
-   m=re.fullmatch(r'/receipt/([A-Za-z0-9]{5,40})/?',u.path)
-   return m.group(1) if m else None
-  except Exception:return None
- return value if re.fullmatch(r'[A-Za-z0-9]{5,40}',value) else None
+<section class="screen" id="wallet">
+ <div class="title"><h3 id="walletTitle">💳 Wallet</h3></div>
+ <div class="panel"><div class="muted small" id="currentBalLabel">AVAILABLE BALANCE</div><h2 id="walletBal">0.00 Birr</h2><div class="notice" id="autoNote">Deposits and withdrawals remain pending until verified by the operator/payment process. Never send money to a recipient you have not checked.</div></div>
+ <div class="wallet-actions">
+  <button class="wallet-tab active" data-wallet-tab="deposit" onclick="walletTab('deposit')">➕ Deposit</button>
+  <button class="wallet-tab" data-wallet-tab="withdraw" onclick="walletTab('withdraw')">⬆️ Withdraw</button>
+  <button class="wallet-tab" data-wallet-tab="transfer" onclick="walletTab('transfer')">↔️ Transfer</button>
+ </div>
+ <div class="panel wallet-pane active" id="depositPane">
+  <h3 id="depositReq">➕ Deposit</h3>
+  <div class="provider-brand-strip" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+   <button type="button" class="provider-brand active" data-provider-brand="telebirr" onclick="chooseProvider('telebirr')"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/tele_birr/tele_birr.svg" alt="Telebirr logo"><span>telebirr</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="cbe_bank" onclick="chooseProvider('cbe_bank')"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/commercial_bank_of_ethiopia/commercial_bank_of_ethiopia.svg" alt="Commercial Bank of Ethiopia logo"><span>CBE</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="ebirr" onclick="chooseProvider('ebirr')"><img src="https://visit.ebirr.com/img/logo.webp" alt="Official eBirr logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="brand-fallback" style="display:none">eB</span><span>eBirr</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="mpesa" onclick="chooseProvider('mpesa')"><img src="https://play-lh.googleusercontent.com/aNTX4YdITm2ZttFNiuJQ8X-17-656cyOFeTfchNwu9MmhZbBv_Fl1pPUFzv6s5xOMszlrHb3LH6j4JlUrgOiVJk%3Dw240-h480" alt="M-PESA Safaricom Ethiopia official app logo"><span>M-PESA</span></button>
+  </div>
+  <label class="small muted">Choose payment method</label>
+  <select class="field" id="provider" onchange="showDepositDetails()">
+   <option value="telebirr">Telebirr</option><option value="cbe_bank">CBE Bank</option><option value="ebirr">eBirr</option><option value="mpesa">M-Pesa</option>
+  </select>
+  <div id="depositDetails" class="provider-list"></div>
+  <label class="small muted">Amount you deposited (Birr)</label><input class="field" id="amount" type="number" min="1" step="0.01" placeholder="Enter the exact amount, e.g. 100">
+  <label class="small muted">Transaction reference or receipt link</label><input class="field" id="reference" placeholder="Telebirr code, or CBE receipt link from mbreciept.cbe.com.et">
+  <label class="small muted">Payment confirmation SMS (optional, helps compare the amount)</label><textarea class="field sms-box" id="paymentMessage" rows="5" placeholder="Paste the full payment confirmation SMS if available"></textarea>
+  <button class="primary" onclick="deposit()" id="submitDeposit">Verify receipt & submit deposit</button>
+  <p class="muted small" id="depositHelp">Telebirr and new CBE receipt links are checked using the free Cheki public verifier. Wallet credit requires a verified successful receipt, exact amount, matching authorized receiver and unused transaction reference. If any check fails, the request stays pending. Old CBE FT references, eBirr and M-Pesa are not auto-credited.</p>
+ </div>
+ <div class="panel wallet-pane" id="withdrawPane">
+  <h3>⬆️ Withdraw money</h3>
+  <label class="small muted">Amount to withdraw (Birr)</label><input class="field" id="withdrawAmount" type="number" min="1" placeholder="100">
+  <label class="small muted">Choose withdrawal method</label>
+  <select class="field" id="withdrawProvider" onchange="updateWithdrawDestination()"><option value="telebirr">Telebirr</option><option value="cbe_bank">CBE Bank</option><option value="ebirr">eBirr</option><option value="mpesa">M-Pesa</option></select>
+  <label class="small muted" id="withdrawDestinationLabel">Phone number</label>
+  <input class="field" id="withdrawDestination" placeholder="Enter phone number">
+  <button class="primary" onclick="withdraw()">Submit withdrawal request</button>
+  <p class="muted small">Requests stay pending while the operator processes them. The amount is reserved from your available balance.</p>
+ </div>
+ <div class="panel wallet-pane" id="transferPane">
+  <h3>↔️ Transfer to a player</h3>
+  <label class="small muted">Find player using</label>
+  <select class="field" id="transferMethod"><option value="phone">📱 Registered phone number</option><option value="username">Telegram username</option></select>
+  <label class="small muted" id="transferRecipientLabel">Player phone number</label>
+  <input class="field" id="transferRecipient" placeholder="Enter registered phone number">
+  <label class="small muted">Amount to transfer (Birr)</label><input class="field" id="transferAmount" type="number" min="1" placeholder="50">
+  <button class="primary" onclick="transfer()">Review and transfer</button>
+  <p class="muted small">Check the recipient and amount carefully. Transfers to other registered players are immediate and cannot be automatically reversed.</p>
+ </div>
+ <div class="title"><h3>Deposit Requests</h3></div><div class="panel" id="deposits"></div>
+ <div class="title"><h3>Withdrawal Requests</h3></div><div class="panel" id="withdrawals"></div>
+ <div class="title"><h3 id="txTitle">📜 Transaction History</h3></div><div class="panel" id="transactions"></div>
+ </section>
 
-class _ReceiptTextParser(__import__('html.parser',fromlist=['HTMLParser']).HTMLParser):
- def __init__(self):
-  super().__init__();self.parts=[];self.hidden=0
- def handle_starttag(self,tag,attrs):
-  if tag in ('script','style','noscript'):self.hidden+=1
- def handle_endtag(self,tag):
-  if tag in ('script','style','noscript') and self.hidden:self.hidden-=1
- def handle_data(self,data):
-  if not self.hidden:self.parts.append(data)
+<section class="screen" id="leaderboard">
+<div class="title"><h3 id="leaderTitle">🏆 Leaderboard</h3></div>
+<div class="panel" id="leaders">Loading…</div>
+<div class="panel" style="margin-top:12px"><h3 id="inviteTitle">👥 Invite Friends</h3><p class="muted small" id="inviteText">Friends must open your link and press Start to register.</p><input class="field" id="refLink" readonly><button class="primary" onclick="copyLink()" id="copyBtn">Copy Referral Link</button></div>
+</section>
 
-def _fetch_telebirr_receipt(ref:str):
- """Conservative public receipt parser. It returns data only when fields are explicit."""
- url='https://transactioninfo.ethiotelecom.et/receipt/'+urllib.parse.quote(ref,safe='')
- class SafeRedirect(urllib.request.HTTPRedirectHandler):
-  def redirect_request(self,req,fp,code,msg,headers,newurl):
-   u=urllib.parse.urlsplit(newurl)
-   if u.scheme!='https' or u.hostname!='transactioninfo.ethiotelecom.et':return None
-   return super().redirect_request(req,fp,code,msg,headers,newurl)
- opener=urllib.request.build_opener(SafeRedirect)
- req=urllib.request.Request(url,headers={'User-Agent':'CartelaBingo-ReceiptCheck/1.0','Accept':'text/html'})
- try:
-  with opener.open(req,timeout=8) as response:
-   if response.geturl().split('/')[2].lower()!='transactioninfo.ethiotelecom.et':return None
-   raw=response.read(1_000_001)
-   if len(raw)>1_000_000:return None
-   charset=response.headers.get_content_charset() or 'utf-8'
-   page=raw.decode(charset,errors='replace')
- except Exception as exc:
-  logger.info('Telebirr receipt could not be fetched (%s)',type(exc).__name__)
-  return None
- parser=_ReceiptTextParser()
- try:parser.feed(page)
- except Exception:return None
- visible=' '.join(html.unescape(x) for x in parser.parts)
- visible=normalize_digits(re.sub(r'\s+',' ',visible)).strip()
- if not visible or ref.lower() not in visible.lower():return None
- low=visible.lower()
- success=('successful' in low or 'successfully' in low or 'completed' in low or 'በተሳካ ሁኔታ' in visible)
- failure=any(x in low for x in ('transaction failed','status: failed','unsuccessful','pending'))
- if not success or failure:return None
- # Extract only an explicitly labelled transaction amount; never use fees or balance as fallback.
- amount_patterns=[
-  r'(?i)(?:transaction\s+amount|transfer\s+amount|payment\s+amount|amount\s+transferred|amount)\s*[:：-]?\s*(?:ETB|Birr|ብር)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:ETB|Birr|ብር)?',
-  r'(?:የተላለፈው\s*መጠን|የክፍያ\s*መጠን)\s*[:：-]?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:ETB|Birr|ብር)?'
- ]
- amount=None
- for pat in amount_patterns:
-  m=re.search(pat,visible)
-  if m:
-   try:amount=Decimal(m.group(1).replace(',','')).quantize(Decimal('0.01'));break
-   except Exception:pass
- if amount is None:return None
- digits=re.sub(r'\D','',visible)
- # Require an exact authorized recipient to be present in the receipt text.
- cbe='1000261740528' in digits
- telebirr_phone='0943912235' in digits or '251943912235' in digits
- if not (cbe or telebirr_phone):return None
- return {'amount':amount,'destination':'cbe_bank' if cbe else 'telebirr','receipt_text':visible[:5000]}
+<section class="screen" id="profile">
+<div class="title"><h3 id="profileTitle">👤 Player Profile</h3></div>
+<div class="panel"><div style="font-size:44px">🧑🏽‍🎮</div><h2 id="name">Player</h2><div class="muted" id="handle">Telegram player</div><div class="notice" id="profileNote">Your Telegram identity is verified when opened from the bot.</div></div>
+<div class="title"><h3 id="settings">⚙️ Settings</h3></div>
+<div class="panel"><div class="row"><span>🌐 Language / ቋንቋ</span><button class="secondary" onclick="toggleLang()">English / አማርኛ</button></div><div class="row"><span>🆘 Support</span><span class="muted small">Contact admin</span></div><div class="row"><span>👥 Referrals</span><span class="pill" id="refCount">0</span></div></div>
+</section>
+</div>
 
-def extract_cbe_receipt_url(value:str)->Optional[str]:
- """Accept only CBE's public receipt host, never arbitrary URLs."""
- value=(value or "").strip().rstrip(".,;)")
- if not value:return None
- try:
-  u=urllib.parse.urlsplit(value)
-  if u.scheme!="https" or u.hostname!="mbreciept.cbe.com.et" or u.port not in (None,443) or u.username or u.password:return None
-  if not re.fullmatch(r"/[A-Za-z0-9_-]{8,100}\.?",u.path):return None
-  path=u.path.rstrip(".")
-  return urllib.parse.urlunsplit(("https","mbreciept.cbe.com.et",path,u.query,""))
- except Exception:return None
+<nav class="bottom">
+<button class="nav active" data-tab="home" onclick="go('home')"><span>🏠</span><b id="navHome">Home</b></button>
+<button class="nav" data-tab="game" onclick="go('game')"><span>🎱</span><b id="navGame">Game</b></button>
+<button class="nav" data-tab="wallet" onclick="go('wallet')"><span>💳</span><b id="navWallet">Wallet</b></button>
+<button class="nav" data-tab="leaderboard" onclick="go('leaderboard')"><span>🏆</span><b id="navLeaders">Leaders</b></button>
+<button class="nav" data-tab="profile" onclick="go('profile')"><span>👤</span><b id="navProfile">Profile</b></button>
+</nav>
 
-def _cheki_verify(payload:dict)->dict:
- """Call the public Cheki verifier; this is a third-party scraper, not a bank API."""
- data=json.dumps(payload).encode("utf-8")
- request=urllib.request.Request("https://cheki.et/api/verify",data=data,headers={"Content-Type":"application/json","Accept":"application/json","User-Agent":"CartelaBingo/1.0"},method="POST")
- try:
-  with urllib.request.urlopen(request,timeout=12) as response:
-   raw=response.read(250001)
-   if len(raw)>250000:return {"success":False,"error":"Verifier response was too large."}
-   parsed=json.loads(raw.decode("utf-8"))
-   return parsed if isinstance(parsed,dict) else {"success":False,"error":"Invalid verifier response."}
- except Exception as exc:
-  logger.warning("Cheki receipt verification failed (%s)",type(exc).__name__)
-  return {"success":False,"error":"The free receipt verifier is temporarily unreachable. No balance was changed."}
+<script>
+/*
+ * Telegram Mini App initialization.
+ * Read WebApp and initData dynamically instead of relying on a
+ * potentially stale value captured at page startup.
+ */
+function telegramApp() {
+  return window.Telegram && window.Telegram.WebApp
+    ? window.Telegram.WebApp
+    : null;
+}
 
-def _field(data:dict,*names):
- for name in names:
-  value=data.get(name)
-  if value not in (None,""):
-   return str(value)
- return ""
+function init() {
+  const webApp = telegramApp();
+  return webApp && typeof webApp.initData === 'string'
+    ? webApp.initData
+    : '';
+}
 
-def _destination_matches(provider:str,data:dict)->bool:
- """Require the verified receipt's receiver field to show an allowed destination suffix."""
- if provider=="telebirr":
-  receiver=_field(data,"creditedPartyAccountNumber","creditedPartyAccount","receiverAccount","receiverPhone","creditedPartyPhone","receiverAccountNumber","receiverMsisdn","receiverNumber")
-  allowed=("0528","2235") # CBE account ending 0528 or Telebirr number ending 2235
- elif provider=="cbe_bank":
-  receiver=_field(data,"receiverAccount","receiverAccountNumber","creditedPartyAccountNumber","creditedPartyAccount")
-  allowed=("0528",)
- else:return False
- digits=re.sub(r"\D","",receiver)
- return bool(digits and any(digits.endswith(suffix) for suffix in allowed))
+const tg = telegramApp();
 
-async def verify_deposit_reference(provider:str,reference:str,amount:Decimal,request_id:int,telegram_id:int)->dict:
- """Verify via Cheki and credit once only when success, amount and destination all match."""
- if provider=="telebirr":
-  ref=extract_telebirr_reference(reference)
-  if not ref:return {"verified":False,"reason":"Enter a Telebirr transaction reference or official receipt URL."}
-  payload={"bank":"telebirr","reference":ref}
-  provider_label="telebirr"
-  request_ref=ref
- elif provider=="cbe_bank":
-  url=extract_cbe_receipt_url(reference)
-  if not url:return {"verified":False,"reason":"For CBE, paste the new receipt link from the CBE app (mbreciept.cbe.com.et). An old FT reference alone cannot be verified by this free checker."}
-  payload={"reference":url}
-  provider_label="cbe_bank"
-  request_ref=url
- else:
-  return {"verified":False,"reason":"This provider is not supported by the free verifier yet. No wallet credit was made."}
- data=await asyncio.to_thread(_cheki_verify,payload)
- # success means the verifier request worked; verified must independently be true.
- if data.get("success") is not True or data.get("verified") is not True:
-  reason=str(data.get("error") or data.get("message") or "The verifier could not confirm this receipt.")
-  return {"verified":False,"reason":reason+" No wallet credit was made."}
- try:
-  verified_amount=Decimal(str(data.get("amount"))).quantize(Decimal("0.01"))
- except Exception:
-  return {"verified":False,"reason":"The verifier did not return a valid transaction amount. No wallet credit was made."}
- if str(data.get("currency","ETB")).upper() not in ("ETB","BIRR"):
-  return {"verified":False,"reason":"The receipt currency is not ETB. No wallet credit was made."}
- if verified_amount!=amount.quantize(Decimal("0.01")):
-  return {"verified":False,"reason":f"Verified receipt amount is {verified_amount} Birr, not {amount} Birr. No wallet credit was made."}
- if not _destination_matches(provider,data):
-  logger.warning("Verified %s receipt did not expose a matching authorized receiver; keys=%s",provider,sorted(data.keys()))
-  return {"verified":False,"reason":"The receipt was found, but the verifier did not show a receiver account matching your authorized destination ending 0528 or Telebirr phone ending 2235. It remains pending; no wallet credit was made."}
- external_ref=_field(data,"reference","transactionNumber","transactionId") or (extract_telebirr_reference(reference) if provider=="telebirr" else request_ref)
- if not re.fullmatch(r"[A-Za-z0-9._:-]{5,200}",external_ref):
-  return {"verified":False,"reason":"The verifier returned an invalid transaction reference. No wallet credit was made."}
- # CBE links can change shape; use the bank's transaction reference for duplicate protection.
- unique_ref=external_ref if provider=="telebirr" else "cbe:"+external_ref
- async with engine.begin() as c:
-  # A verified reference must be globally unique in our ledger. Insert is the concurrency gate.
-  inserted=(await c.execute(text("INSERT INTO payment_records(provider,external_reference,amount,payer_reference,memo) VALUES(:p,:r,:a,NULL,:m) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{"p":provider_label,"r":unique_ref,"a":verified_amount,"m":"Verified by free Cheki public receipt checker; receiver suffix matched"})).scalar_one_or_none()
-  if inserted is None:
-   return {"verified":False,"reason":"This transaction reference has already been submitted or credited. No second wallet credit was made."}
-  already=(await c.execute(text("SELECT id FROM bingo_transactions WHERE external_reference=:r"),{"r":"payment:"+unique_ref})).scalar_one_or_none()
-  if already is not None:
-   await c.execute(text("DELETE FROM payment_records WHERE external_reference=:r"),{"r":unique_ref})
-   return {"verified":False,"reason":"This reference already exists in the wallet ledger. No second credit was made."}
-  claimed=(await c.execute(text("UPDATE deposit_requests SET status='verified',verified_at=NOW() WHERE id=:id AND telegram_id=:u AND status='pending' AND amount=:a RETURNING id"),{"id":request_id,"u":telegram_id,"a":amount})).scalar_one_or_none()
-  if claimed is None:
-   await c.execute(text("DELETE FROM payment_records WHERE external_reference=:r"),{"r":unique_ref})
-   return {"verified":False,"reason":"The deposit request could not be safely matched. No wallet credit was made."}
-  matched=(await c.execute(text("UPDATE payment_records SET matched_request_id=:i WHERE external_reference=:r AND matched_request_id IS NULL RETURNING id"),{"i":request_id,"r":unique_ref})).scalar_one_or_none()
-  if matched is None:
-   raise RuntimeError("Payment reference could not be claimed atomically")
-  await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'deposit',:a,'verified',:d,:r)"),{"u":telegram_id,"a":amount,"d":f"Cheki-verified {provider_label} deposit #{request_id}","r":"payment:"+unique_ref})
-  await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":amount,"u":telegram_id})
- return {"verified":True,"reason":"Receipt verified, amount and authorized receiver matched, and wallet credited once."}
+if (tg) {
+  tg.ready();
+  tg.expand();
+  try {
+    tg.setHeaderColor('#071525');
+    tg.setBackgroundColor('#071525');
+  } catch (e) {
+    console.warn('Telegram appearance settings unavailable:', e);
+  }
+}
 
-@app.post("/api/deposits")
-async def deposit(b:Dep,req:Request):
- u=await who(req);p=b.provider.lower()
- if p not in PROVIDERS:raise HTTPException(400,"Unknown provider.")
- message=(b.message or '').strip()
- raw=(b.reference or '').strip()
- if not raw and message:
-  sms_ref=parse_sms_reference(message)
-  if sms_ref:raw=sms_ref
- if p=="telebirr":
-  ref=extract_telebirr_reference(raw)
-  if not ref and raw and not raw.lower().startswith(("http://","https://")) and re.fullmatch(r"[A-Za-z0-9-]{5,40}",raw):ref=raw
- elif p=="cbe_bank":
-  ref=extract_cbe_receipt_url(raw) or (raw if not raw.lower().startswith(("http://","https://")) and re.fullmatch(r"[A-Za-z0-9-]{5,200}",raw) else None)
- else:
-  ref=raw if raw and not raw.lower().startswith(("http://","https://")) and re.fullmatch(r"[A-Za-z0-9-]{5,200}",raw) else None
- if not message and not ref:raise HTTPException(400,"Enter a transaction reference or the provider's receipt link.")
- parsed=parse_sms_amount(message) if message else None
- entered=b.amount.quantize(Decimal('0.01'))
- if message and parsed is None:raise HTTPException(400,"I could not find a clear Birr amount in that SMS. Paste the full confirmation SMS or submit the receipt reference alone.")
- if parsed is not None and parsed != entered:raise HTTPException(400,f"Amount mismatch: the SMS appears to show {parsed} Birr, but you entered {entered} Birr.")
- if not ref:ref='SMS-'+hashlib.sha256(message.encode()).hexdigest()[:16]
- if p in ("telebirr","cbe_bank") and not ref.startswith("SMS-"):
-  # Fast duplicate pre-check for a friendly message; the unique DB constraint remains authoritative.
-  unique_hint=ref if p=="telebirr" else None
-  if unique_hint:
-   async with engine.connect() as c:
-    old=(await c.execute(text("SELECT matched_request_id FROM payment_records WHERE external_reference=:r"),{"r":unique_hint})).first()
-   if old:
-    raise HTTPException(409,"This payment reference has already been submitted or credited. It cannot be used again.")
- async with engine.begin() as c:
-  rid=(await c.execute(text("INSERT INTO deposit_requests(telegram_id,provider,amount,reference,payment_message,parsed_message_amount) VALUES(:i,:p,:a,:r,:m,:pa) RETURNING id"),{'i':int(u['id']),'p':p,'a':entered,'r':ref,'m':message or None,'pa':parsed})).scalar_one()
- if p in ("telebirr","cbe_bank") and not ref.startswith("SMS-"):
-  result=await verify_deposit_reference(p,ref,entered,int(rid),int(u['id']))
-  if result['verified']:
-   return {'ok':True,'id':rid,'status':'verified','parsed_amount':float(entered),'reference':ref,'message':result['reason']}
-  return {'ok':True,'id':rid,'status':'pending','parsed_amount':float(parsed) if parsed is not None else None,'reference':ref,'message':result['reason']}
- return {'ok':True,'id':rid,'status':'pending','parsed_amount':float(parsed) if parsed is not None else None,'reference':ref,'message':'Request saved. This provider cannot be reliably checked by the free verifier yet, so the wallet remains unchanged until trusted confirmation.'}
+let L = 'en';
+let me = null;
+let G = null;
+let winCells = [];
+let busy = false;
+let interval = null;
+const selectedCartelas = new Set();
+const manualMarksByCard = {};
 
-class Withdrawal(BaseModel):
- provider:str
- amount:Decimal=Field(gt=0,le=Decimal("1000000"))
- destination:str=Field(min_length=5,max_length=100)
-@app.post("/api/withdrawals")
-async def withdrawal(b:Withdrawal,req:Request):
- u=await who(req);i=int(u["id"]);p=b.provider.lower()
- if p not in ("telebirr","cbe_bank","ebirr","mpesa"):raise HTTPException(400,"Choose Telebirr, CBE Bank, eBirr, or M-Pesa.")
- dest=re.sub(r"[^A-Za-z0-9+@._ -]","",b.destination).strip()
- if p=="cbe_bank":
-  if len(re.sub(r"\D","",dest))<8:raise HTTPException(400,"Enter a valid CBE account number.")
- else:
-  if len(re.sub(r"\D","",dest))<9:raise HTTPException(400,"Enter a valid phone number.")
- async with engine.begin() as c:
-  bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i FOR UPDATE"),{"i":i})).scalar_one_or_none() or 0
-  pending=(await c.execute(text("SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE telegram_id=:i AND status='pending'"),{"i":i})).scalar_one() or 0
-  if Decimal(str(bal))-Decimal(str(pending))<b.amount:raise HTTPException(402,"Insufficient available balance.")
-  rid=(await c.execute(text("INSERT INTO withdrawal_requests(telegram_id,provider,amount,destination) VALUES(:i,:p,:a,:d) RETURNING id"),{"i":i,"p":p,"a":b.amount,"d":dest})).scalar_one()
-  await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:i,'withdrawal',:a,'pending',:d)"),{"i":i,"a":-b.amount,"d":f"Withdrawal request #{rid} via {p}"})
- return {"ok":True,"id":rid,"status":"pending","message":"Withdrawal request submitted. Funds are reserved while it is pending."}
-class Transfer(BaseModel):
- method:str
- recipient:str=Field(min_length=2,max_length=120)
- amount:Decimal=Field(gt=0,le=Decimal("1000000"))
-@app.post("/api/transfers")
-async def transfer(b:Transfer,req:Request):
- u=await who(req);sender=int(u["id"]);method=b.method.lower();target=b.recipient.strip()
- if method not in ("phone","username"):raise HTTPException(400,"Choose phone or username.")
- async with engine.begin() as c:
-  if method=="phone":
-   phone=re.sub(r"\D","",target)
-   recipient=(await c.execute(text("SELECT telegram_id,COALESCE(display_name,username,'Player'),username FROM bingo_users WHERE RIGHT(COALESCE(phone_number,''),9)=RIGHT(:p,9) AND phone_verified=TRUE LIMIT 1"),{"p":phone})).first()
-  else:
-   username=target.lstrip("@").lower()
-   recipient=(await c.execute(text("SELECT telegram_id,COALESCE(display_name,username,'Player'),username FROM bingo_users WHERE LOWER(username)=:u LIMIT 1"),{"u":username})).first()
-  if not recipient:raise HTTPException(404,"No registered player was found with those details.")
-  rid=int(recipient[0])
-  if rid==sender:raise HTTPException(400,"You cannot transfer to yourself.")
-  ids=sorted([sender,rid])
-  balances=(await c.execute(text("SELECT telegram_id,balance FROM bingo_wallets WHERE telegram_id IN (:a,:b) ORDER BY telegram_id FOR UPDATE"),{"a":ids[0],"b":ids[1]})).fetchall()
-  bm={int(x[0]):Decimal(str(x[1] or 0)) for x in balances}
-  pending=(await c.execute(text("SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE telegram_id=:i AND status='pending'"),{"i":sender})).scalar_one() or 0
-  if bm.get(sender,Decimal("0"))-Decimal(str(pending))<b.amount:raise HTTPException(402,"Insufficient available balance.")
-  await c.execute(text("UPDATE bingo_wallets SET balance=balance-:a,updated_at=NOW() WHERE telegram_id=:i"),{"a":b.amount,"i":sender})
-  await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:i"),{"a":b.amount,"i":rid})
-  await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:i,'transfer_sent',:a,'verified',:d),(:r,'transfer_received',:a,'verified',:rd)"),{"i":sender,"r":rid,"a":b.amount,"d":f"Transfer to {recipient[1]}","rd":f"Transfer from Telegram user {sender}"})
- return {"ok":True,"recipient":{"name":recipient[1],"username":recipient[2]},"amount":float(b.amount)}
-class Payment(BaseModel):
- provider:str;external_reference:str=Field(min_length=2,max_length=200);amount:Decimal=Field(gt=0);payer_reference:Optional[str]=None;memo:Optional[str]=None
-@app.post("/api/payments/records")
-async def payment(b:Payment,x_payment_api_key:str=Header(default="")):
- if not PAYKEY or not secrets.compare_digest(x_payment_api_key,PAYKEY):raise HTTPException(401,"Invalid payment integration key.")
- p=b.provider.lower()
- if p not in PROVIDERS:raise HTTPException(400,"Unknown provider.")
- async with engine.begin() as c:
-  inserted=(await c.execute(text("INSERT INTO payment_records(provider,external_reference,amount,payer_reference,memo) VALUES(:p,:r,:a,:pr,:m) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{"p":p,"r":b.external_reference,"a":b.amount,"pr":b.payer_reference,"m":b.memo})).scalar_one_or_none()
-  existing=(await c.execute(text("SELECT matched_request_id FROM payment_records WHERE external_reference=:r FOR UPDATE"),{"r":b.external_reference})).first()
-  if existing and existing[0] is not None:
-   return {"ok":True,"matched":True,"duplicate":True,"request_id":existing[0],"message":"This payment reference was already processed; no second wallet credit was made."}
-  x=(await c.execute(text("SELECT id,telegram_id,amount,reference FROM deposit_requests WHERE provider=:p AND status='pending' AND amount=:a AND (reference=:r OR reference=:pr OR POSITION(reference IN COALESCE(:m,''))>0) ORDER BY id LIMIT 1 FOR UPDATE"),{"p":p,"a":b.amount,"r":b.external_reference,"pr":b.payer_reference,"m":b.memo or ""})).first()
-  if x:
-   matched=(await c.execute(text("UPDATE payment_records SET matched_request_id=:i WHERE external_reference=:r AND matched_request_id IS NULL RETURNING id"),{"i":x[0],"r":b.external_reference})).scalar_one_or_none()
-   if matched is None:
-    return {"ok":True,"matched":False,"duplicate":True,"message":"This payment reference was already handled; no wallet credit was made."}
-   await c.execute(text("UPDATE deposit_requests SET status='verified',verified_at=NOW() WHERE id=:i AND status='pending'"),{"i":x[0]})
-   await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a WHERE telegram_id=:u"),{"a":x[2],"u":x[1]})
-   await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'deposit',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING"),{"u":x[1],"a":x[2],"d":f"Verified {p} deposit #{x[0]}","r":f"payment:{b.external_reference}"})
-   return {"ok":True,"matched":True,"request_id":x[0]}
- return {"ok":True,"matched":False,"message":"Stored but no exact pending request matched."}
-@app.get("/api/leaderboard")
-async def leaderboard(req:Request):
- await who(req)
- async with engine.connect() as c:
-  r=await c.execute(text("SELECT u.telegram_id,COALESCE(NULLIF(MAX(u.display_name),''),NULLIF(MAX(u.username),''),'Player'),COUNT(DISTINCT g.id) AS wins FROM bingo_games g JOIN bingo_users u ON u.telegram_id=g.winner_telegram_id WHERE g.winner_telegram_id IS NOT NULL GROUP BY u.telegram_id ORDER BY wins DESC,MIN(g.finished_at) ASC NULLS LAST LIMIT 50"));rows=r.fetchall()
- return {"players":[{"telegram_id":int(x[0]),"name":x[1],"wins":int(x[2])} for x in rows]}
-@app.websocket("/ws/game")
-async def ws(ws:WebSocket):
- await ws.accept()
- try:
-  while True:
-   async with lock:
-    if g["status"]=="waiting" and g["lobby_started_at"] is not None:g["seconds"]=max(0,math.ceil(30-(time.time()-g["lobby_started_at"])))
-    d={"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"player_count":len({p.get("user_id") for p in g["players"].values()}),"winner":g["winner"]}
-   await ws.send_json(d);await asyncio.sleep(1)
- except (WebSocketDisconnect,RuntimeError):pass
+const strings = {
+  en: {
+    hero:'🎉 Welcome to Cartela Bingo!',
+    tagline:'Choose a cartela. Follow the numbers. Claim your win!',
+    balLabel:'YOUR BALANCE',playersLabel:'PLAYERS',
+    play:'🎮 Play Bingo Now',quick:'✨ Quick Access',
+    depositTile:'Deposit Funds',walletTile:'My Wallet',
+    leaderTile:'Leaderboard',profileTile:'My Profile',
+    liveTitle:'🎱 Live Game',lobbyHint:'Choose a cartela to join the next game.',
+    openLobby:'Open Game Lobby →',gameTitle:'🎮 Game Lobby',
+    chooseDesc:'Choose your cartela and join the next game.',
+    lastLabel:'Last number called',chooseCard:'Choose Your Cartela',
+    stakeLabel:'Bet per cartela (minimum 30 Birr)',yourCard:'Your Cartela',
+    calledTitle:'📣 Called Numbers',bingo:'🏆 BINGO!',
+    walletTitle:'💳 Wallet & Deposits',currentBalLabel:'CURRENT BALANCE',
+    autoNote:'Automatic verification requires an authorized provider or account integration to send transaction records to this server.',
+    depositReq:'➕ Create Deposit Request',submitDeposit:'Submit Deposit Request',
+    depositHelp:'Balance is credited only when a trusted transaction record matches the provider, amount and reference.',
+    txTitle:'📜 Transaction History',leaderTitle:'🏆 Leaderboard',
+    inviteTitle:'👥 Invite Friends',
+    inviteText:'Friends must open your link and press Start to register.',
+    copyBtn:'Copy Referral Link',profileTitle:'👤 Player Profile',
+    profileNote:'Your Telegram identity is verified when opened from the bot.',
+    settings:'⚙️ Settings',navHome:'Home',navGame:'Game',
+    navWallet:'Wallet',navLeaders:'Leaders',navProfile:'Profile',
+    available:'Available',taken:'Taken',select:'Select',joined:'Selected',
+    waiting:'WAITING',running:'LIVE',finished:'FINISHED',
+    need:'Telegram launch data is missing. Close the Mini App and reopen it using Play Now in your bot chat.',
+    joinok:'Cartela reserved. Game starts when the lobby timer ends.',
+    claimok:'BINGO VERIFIED! Winning cells are highlighted.',
+    empty:'None yet.',copied:'Referral link copied.',
+    request:'Deposit request submitted. It stays pending until a matching trusted record arrives.'
+  },
+  am: {
+    hero:'🎉 ወደ Cartela Bingo እንኳን በደህና መጡ!',
+    tagline:'ካርቴላ ይምረጡ። ቁጥሮችን ይከታተሉ። ያሸንፉ!',
+    balLabel:'ቀሪ ሂሳብዎ',playersLabel:'ተጫዋቾች',
+    play:'🎮 ቢንጎ ይጫወቱ',quick:'✨ ፈጣን አማራጮች',
+    depositTile:'ገንዘብ ያስገቡ',walletTile:'የእኔ ሂሳብ',
+    leaderTile:'ደረጃ ሰንጠረዥ',profileTile:'የእኔ መገለጫ',
+    liveTitle:'🎱 የቀጥታ ጨዋታ',
+    lobbyHint:'ቀጣዩን ጨዋታ ለመቀላቀል ካርቴላ ይምረጡ።',
+    openLobby:'የጨዋታ ክፍል ይክፈቱ →',
+    gameTitle:'🎮 የጨዋታ ክፍል',
+    chooseDesc:'ካርቴላዎን ይምረጡና ይቀላቀሉ።',
+    lastLabel:'የመጨረሻ የተጠራ ቁጥር',
+    chooseCard:'ካርቴላዎን ይምረጡ',
+    stakeLabel:'ለእያንዳንዱ ካርቴላ ውርርድ (ቢያንስ 30 ብር)',
+    yourCard:'የእርስዎ ካርቴላ',
+    calledTitle:'📣 የተጠሩ ቁጥሮች',bingo:'🏆 ቢንጎ!',
+    walletTitle:'💳 ሂሳብና ተቀማጭ',
+    currentBalLabel:'የአሁኑ ሂሳብ',
+    autoNote:'ራስ-ሰር ማረጋገጫ ለመስራት የተፈቀደ የክፍያ አቅራቢ ወይም የሂሳብ ግንኙነት የግብይት መዝገቦችን ወደ ሰርቨሩ መላክ አለበት።',
+    depositReq:'➕ የተቀማጭ ጥያቄ ይፍጠሩ',
+    submitDeposit:'ጥያቄ ላክ',
+    depositHelp:'የተፈቀደ መዝገብ ከአቅራቢ፣ መጠንና ማጣቀሻ ጋር ካልተዛመደ ሂሳብ አይጨምርም።',
+    txTitle:'📜 የግብይት ታሪክ',
+    leaderTitle:'🏆 ደረጃ ሰንጠረዥ',
+    inviteTitle:'👥 ጓደኞችን ይጋብዙ',
+    inviteText:'ጓደኞች ሊንኩን ከፍተው Start መጫን አለባቸው።',
+    copyBtn:'የግብዣ ሊንክ ቅዳ',
+    profileTitle:'👤 የተጫዋች መገለጫ',
+    profileNote:'ከቦቱ ሲከፈት የTelegram መለያዎ ይረጋገጣል።',
+    settings:'⚙️ ቅንብሮች',navHome:'ቤት',navGame:'ጨዋታ',
+    navWallet:'ሂሳብ',navLeaders:'ደረጃ',navProfile:'መገለጫ',
+    available:'ክፍት',taken:'ተይዟል',select:'ይምረጡ',
+    joined:'ተመርጧል',waiting:'በመጠባበቅ',
+    running:'በቀጥታ',finished:'ተጠናቋል',
+    need:'ከTelegram ቦትዎ ይክፈቱ።',
+    joinok:'ካርቴላ ተይዟል። ጊዜው ሲያበቃ ጨዋታው ይጀምራል።',
+    claimok:'ቢንጎ ተረጋግጧል! አሸናፊ ህዋሶች ተደምቀዋል።',
+    empty:'ገና የለም።',copied:'ሊንኩ ተቀድቷል።',
+    request:'የተቀማጭ ጥያቄ ተልኳል። የተፈቀደ መዝገብ እስኪዛመድ ይጠብቃል።'
+  }
+};
+
+function t(k){return (strings[L]&&strings[L][k])||strings.en[k]||k}
+
+function msg(s,bad=false){
+  const n=document.getElementById('notice');
+  n.textContent=s;
+  n.className='notice'+(bad?' err':'');
+  setTimeout(()=>n.classList.add('hidden'),5000);
+}
+
+function go(id){
+  document.querySelectorAll('.screen').forEach(x=>x.classList.toggle('active',x.id===id));
+  document.querySelectorAll('.nav').forEach(x=>x.classList.toggle('active',x.dataset.tab===id));
+  if(id==='game')refreshGame().catch(e=>msg(e.message,true));
+  if(id==='wallet')refreshWallet();
+  if(id==='leaderboard')refreshLeaders();
+  if(id==='profile')refreshMe();
+  window.scrollTo(0,0);
+}
+
+/*
+ * All API requests use the latest Telegram initData.
+ * Do not send Telegram user information as a substitute for initData:
+ * the backend must verify Telegram's signature.
+ */
+async function api(url,opt={}){
+  const webApp=telegramApp();
+  const initData=webApp&&typeof webApp.initData==='string'
+    ? webApp.initData
+    : '';
+
+  if(!initData){
+    throw new Error(
+      'Telegram launch data is missing. Close the Mini App and reopen it using the Play Now button inside your bot chat.'
+    );
+  }
+
+  const headers=new Headers(opt.headers||{});
+  headers.set('Content-Type','application/json');
+  headers.set('X-Telegram-Init-Data',initData);
+
+  const response=await fetch(url,{...opt,headers});
+  const contentType=response.headers.get('content-type')||'';
+  let data;
+
+  if(contentType.includes('application/json')){
+    data=await response.json();
+  }else{
+    const responseText=await response.text();
+    data={detail:responseText||'The server returned a non-JSON response.'};
+  }
+
+  if(!response.ok){
+    throw new Error(data.detail||data.message||`Request failed (${response.status})`);
+  }
+  return data;
+}
+
+function money(n){
+  return Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+' Birr';
+}
+
+function esc(s){
+  return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function toggleLang(){
+  L=L==='en'?'am':'en';
+  for(const [id,k] of Object.entries({
+    hero:'hero',tagline:'tagline',balLabel:'balLabel',playersLabel:'playersLabel',
+    play:'play',quick:'quick',depositTile:'depositTile',walletTile:'walletTile',
+    leaderTile:'leaderTile',profileTile:'profileTile',liveTitle:'liveTitle',
+    lobbyHint:'lobbyHint',openLobby:'openLobby',gameTitle:'gameTitle',
+    chooseDesc:'chooseDesc',lastLabel:'lastLabel',chooseCard:'chooseCard',
+    stakeLabel:'stakeLabel',yourCard:'yourCard',calledTitle:'calledTitle',
+    bingo:'bingo',walletTitle:'walletTitle',currentBalLabel:'currentBalLabel',
+    autoNote:'autoNote',depositReq:'depositReq',submitDeposit:'submitDeposit',
+    depositHelp:'depositHelp',txTitle:'txTitle',leaderTitle:'leaderTitle',
+    inviteTitle:'inviteTitle',inviteText:'inviteText',copyBtn:'copyBtn',
+    profileTitle:'profileTitle',profileNote:'profileNote',settings:'settings',
+    navHome:'navHome',navGame:'navGame',navWallet:'navWallet',
+    navLeaders:'navLeaders',navProfile:'navProfile'
+  })){
+    const e=document.getElementById(id);
+    if(e)e.textContent=t(k);
+  }
+  document.getElementById('langBtn').textContent=L==='en'?'አማ / EN':'EN / አማ';
+  try{
+    await api('/api/language',{method:'POST',body:JSON.stringify({language:L})});
+  }catch(e){
+    msg(e.message,true);
+  }
+  renderChoices();
+}
+
+async function boot(){
+  /*
+   * Retry briefly in case the Telegram Web App bridge has not finished
+   * initializing when this page's JavaScript first executes.
+   */
+  let launchData='';
+  for(let i=0;i<10;i++){
+    launchData=init();
+    if(launchData)break;
+    await new Promise(resolve=>setTimeout(resolve,200));
+  }
+
+  if(!launchData){
+    msg(
+      'Telegram did not provide launch data. Close this window and open the Mini App using the Play Now button in your bot chat, not a regular browser link.',
+      true
+    );
+    return;
+  }
+
+  try{
+    me=await api('/api/me');
+    L=me.language||'en';
+    document.getElementById('name').textContent=me.name;
+    document.getElementById('handle').textContent=me.username?'@'+me.username:'Telegram player';
+    document.getElementById('refLink').value=me.referral_link;
+    document.getElementById('refCount').textContent=me.referrals;
+    await refreshGame();
+    await refreshWallet();
+    showDepositDetails();updateWithdrawDestination();
+    await refreshLeaders();
+    applyLang();
+    if(interval)clearInterval(interval);
+    interval=setInterval(()=>refreshGame().catch(()=>{}),1000);
+  }catch(e){
+    msg(e.message,true);
+  }
+}
+
+function applyLang(){
+  document.getElementById('langBtn').textContent=L==='en'?'አማ / EN':'EN / አማ';
+}
+
+let callSoundEnabled=false;let lastSoundedCount=0;let audioCtx=null;
+function toggleCallSound(){
+ callSoundEnabled=!callSoundEnabled;
+ const btn=document.getElementById('soundToggle');
+ btn.textContent=callSoundEnabled?'🔊 Called-number sound ON':'🔇 Enable called-number sound';
+ btn.classList.toggle('on',callSoundEnabled);
+ if(callSoundEnabled){try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();audioCtx.resume();playCallTone();}catch(e){msg('Sound is not available in this browser.',true);}}
+}
+function playCallTone(){
+ if(!callSoundEnabled)return;
+ try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();const osc=audioCtx.createOscillator();const gain=audioCtx.createGain();osc.type='sine';osc.frequency.setValueAtTime(740,audioCtx.currentTime);osc.frequency.exponentialRampToValueAtTime(520,audioCtx.currentTime+0.18);gain.gain.setValueAtTime(0.0001,audioCtx.currentTime);gain.gain.exponentialRampToValueAtTime(0.13,audioCtx.currentTime+0.025);gain.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+0.24);osc.connect(gain);gain.connect(audioCtx.destination);osc.start();osc.stop(audioCtx.currentTime+0.25);}catch(e){console.log('Call sound unavailable',e);}
+}
+
+async function refreshGame(){
+  G=await api('/api/game');
+  document.getElementById('status').textContent=t(G.status);
+  document.getElementById('gameStatus').textContent=t(G.status);
+  document.getElementById('gameId').textContent='#'+G.id;
+  document.getElementById('homePlayers').textContent=G.player_count;
+  document.getElementById('homeCount').textContent=G.player_count;
+  document.getElementById('count').textContent=G.player_count;
+  document.getElementById('homeTimer').textContent='00:'+String(Math.max(0,G.lobby_seconds)).padStart(2,'0');
+  document.getElementById('timer').textContent='00:'+String(Math.max(0,G.lobby_seconds)).padStart(2,'0');
+  document.getElementById('homeCalled').textContent=G.called.length+'/75';
+  document.getElementById('calledCount').textContent=G.called.length+'/75';
+  document.getElementById('totalBets').textContent=money(G.total_bets||0);
+  document.getElementById('prizeAmount').textContent=money(G.prize_amount||0);
+  document.getElementById('ownerShare').textContent=money(G.owner_share||0);
+  const liveTaken=(G.players||[]).slice().sort((a,b)=>a.cartela_number-b.cartela_number);
+  document.getElementById('takenCount').textContent=liveTaken.length+' taken';
+  document.getElementById('takenList').innerHTML=liveTaken.map(p=>`<span class="chip">#${p.cartela_number} · ${esc(p.name)} · ${money(p.stake)}</span>`).join('')||'No cartelas taken yet.';
+  const last=G.called.length?G.called[G.called.length-1]:null;
+  if(G.called.length>lastSoundedCount){if(lastSoundedCount>0||G.status==='running')playCallTone();lastSoundedCount=G.called.length;}
+  if(G.status==='waiting'&&G.called.length===0)lastSoundedCount=0;
+  document.getElementById('lastNumber').textContent=last===null?'?':String(last);
+  document.getElementById('lastLabel').textContent=last===null?'Waiting for first number':callLabel(last);
+  document.getElementById('allCalled').innerHTML=G.called.slice().reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('')||t('empty');
+  document.getElementById('recent').innerHTML=G.called.slice(-8).reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('');
+  const mine=G.my_cartelas||((G.my_cartela)?[{cartela:G.my_cartela,cartela_number:G.my_cartela_number,stake:0}]:[]);
+  // Keep the full 1–200 cartela board visible for every player, even after
+  // they reserve a card or while the round is running. Taken numbers are
+  // rendered black from the shared PostgreSQL-backed G.players list.
+  document.getElementById('selectArea').classList.remove('hidden');
+  if(mine.length){
+    document.getElementById('playing').classList.remove('hidden');
+    document.getElementById('cardNum').textContent=mine.length+' cartela(s)';
+    document.getElementById('chooseDesc').textContent=G.status==='waiting'?'Your cartela is reserved. Other taken cartelas are black below. Game starts in '+G.lobby_seconds+' seconds.':G.status==='running'?'LIVE — watch the called number and mark it on each cartela.':'Round finished.';
+    renderCards(mine,G.called,winCells);
+  }else{
+    document.getElementById('playing').classList.add('hidden');
+  }
+  renderChoices();
+  if(G.winner){
+    document.getElementById('claimMsg').textContent='🏆 BINGO! '+G.winner.name+' won with Cartela #'+G.winner.cartela_number+' — prize '+money(G.winner.prize||0)+'.';
+    document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
+  }else if(G.status==='running')document.getElementById('claimMsg').classList.add('hidden');
+  if(G.status==='finished'&&!G.winner){document.getElementById('claimMsg').textContent='All 75 numbers were called. No valid BINGO. Next round is opening…';document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');}
+}
+function renderChoices(){
+ const taken=new Set((G?.players||[]).map(p=>Number(p.cartela_number)));
+ const q=Number(document.getElementById('cartelaSearch')?.value||0);let available=0,h='';
+ for(let n=1;n<=200;n++){
+  const used=taken.has(n);if(!used)available++;if(q&&n!==q)continue;
+  h+=`<button type="button" class="pick ${used?'taken':''} ${selectedCartelas.has(n)?'selected':''}" ${used?'disabled':''} aria-label="Cartela ${n}${used?' taken':' available'}" onclick="selectCartela(${n})">${n}</button>`;
+ }
+ document.getElementById('choices').innerHTML=h||'<div class="muted small">No cartela matches that number.</div>';
+ document.getElementById('availableCount').textContent=available+' available';
+ updateSelectionSummary();
+ document.getElementById('startGameBtn').disabled=!selectedCartelas.size||[...selectedCartelas].some(n=>taken.has(n))||G?.status!=='waiting';
+}
+function selectCartela(n){
+ const taken=new Set((G?.players||[]).map(p=>Number(p.cartela_number)));if(taken.has(n)||G?.status!=='waiting')return;
+ if(selectedCartelas.has(n))selectedCartelas.delete(n);else selectedCartelas.add(n);
+ const search=document.getElementById('cartelaSearch');if(search)search.value='';renderChoices();
+}
+function updateSelectionSummary(){
+ const stake=Number(document.getElementById('stake')?.value||30),count=selectedCartelas.size;
+ document.getElementById('selectedCartelaLabel').textContent=count?[...selectedCartelas].sort((a,b)=>a-b).map(n=>'#'+n).join(', '):'None';
+ document.getElementById('betSummary').textContent=count?`${count} cartela(s) × ${money(stake)} = ${money(count*stake)} total bet (minimum ${money(30)} per cartela).`:'Select one or more cartelas. Minimum bet is 30 Birr per cartela.';
+}
+async function startSelectedGame(){
+ const stake=Number(document.getElementById('stake').value||0);
+ if(!selectedCartelas.size){msg('Please select at least one available cartela.',true);return;}
+ if(!Number.isFinite(stake)||stake<30||stake>1000){msg('Minimum bet is 30 Birr per cartela.',true);return;}
+ await joinGame([...selectedCartelas],stake);
+ if((G?.my_cartelas||[]).length)go('game');
+}
+async function joinGame(nums,stake){
+ if(busy)return;busy=true;document.getElementById('startGameBtn').disabled=true;
+ try{
+  await api('/api/game/join',{method:'POST',body:JSON.stringify({cartela_numbers:nums,stake})});
+  winCells=[];for(const n of nums)manualMarksByCard[n]=new Set([0]);
+  selectedCartelas.clear();msg(`${nums.length} cartela(s) reserved. Total bet: ${money(nums.length*stake)}.`);
+  telegramApp()?.HapticFeedback?.notificationOccurred('success');await refreshGame();
+ }catch(e){msg(e.message,true);await refreshGame().catch(()=>{});}
+ finally{busy=false;if(G&&!(G.my_cartelas||[]).length)renderChoices();}
+}
+function callLabel(n){
+  n=Number(n);
+  return (n<=15?'B':n<=30?'I':n<=45?'N':n<=60?'G':'O')+n;
+}
+
+function renderCards(cards,called,wins=[]){
+ const host=document.getElementById('myCards');
+ host.innerHTML=cards.map(entry=>{
+  const n=Number(entry.cartela_number),card=entry.cartela;const marks=manualMarksByCard[n]||new Set([0]);manualMarksByCard[n]=marks;
+  const winSet=new Set((wins||[]).map(x=>x.join(',')));
+  const cells=card.flatMap((row,r)=>row.map((v,c)=>{
+   const marked=v===0||marks.has(v),wasCalled=v===0||called.includes(v);
+   return `<button type="button" class="cell ${marked?'marked':''} ${!wasCalled?'uncalled':''} ${winSet.has([r,c].join(','))?'win':''}" ${v===0||!called.includes(v)||G.status!=='running'?'disabled':''} onclick="toggleMark(${n},${v})" aria-label="Cartela ${n}, number ${v}">${v===0?'★':v}</button>`;
+  })).join('');
+  return `<div class="my-card-item"><div class="card-caption"><b>Cartela #${n}</b><span class="muted">Bet ${money(entry.stake||0)}</span></div><div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div><div class="card">${cells}</div><button class="danger wide" style="padding:10px" onclick="claim(${n})" ${G.status!=='running'?'disabled':''}>🏆 BINGO! — Cartela #${n}</button></div>`;
+ }).join('');
+}
+function toggleMark(cartela,n){
+ n=Number(n);cartela=Number(cartela);if(!G||!G.called.includes(n)||n===0)return;
+ const marks=manualMarksByCard[cartela]||(manualMarksByCard[cartela]=new Set([0]));
+ if(marks.has(n))marks.delete(n);else marks.add(n);
+ renderCards(G.my_cartelas||[],G.called,winCells);
+}
+async function claim(cartela){
+ try{
+  const marks=manualMarksByCard[Number(cartela)]||new Set([0]);
+  const r=await api('/api/game/claim',{method:'POST',body:JSON.stringify({cartela_number:Number(cartela),marked:[...marks]})});
+  winCells=r.pattern||[];
+  document.getElementById('claimMsg').textContent=`🏆 Valid BINGO! Prize: ${money(r.prize)} (80% of ${money(r.total_bets)} total bets).`;
+  document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
+  await refreshGame();await refreshWallet();telegramApp()?.HapticFeedback?.notificationOccurred('success');
+ }catch(e){document.getElementById('claimMsg').textContent=e.message;document.getElementById('claimMsg').className='notice err';document.getElementById('claimMsg').classList.remove('hidden');}
+}
+
+async function refreshWallet(){
+  try{
+    const w=await api('/api/wallet');
+    if(me)me.balance=w.balance;
+    document.getElementById('homeBal').textContent=money(w.balance);
+    document.getElementById('walletBal').textContent=money(w.available_balance??w.balance);
+    document.getElementById('deposits').innerHTML=w.deposits.map(d=>
+      `<div class="row"><span>${esc(d.provider)}<br><small class="muted">${esc(d.reference)} · ${esc(d.status)}</small></span><b>${money(d.amount)}</b></div>`
+    ).join('')||t('empty');
+    document.getElementById('withdrawals').innerHTML=(w.withdrawals||[]).map(x=>
+      `<div class="row"><span>${esc(x.provider)} · ${esc(x.destination)}<br><small class="muted">#${x.id} · ${esc(x.status)}</small></span><b>${money(x.amount)}</b></div>`
+    ).join('')||t('empty');
+    document.getElementById('transactions').innerHTML=w.transactions.map(x=>
+      `<div class="row"><span>${esc(x.type)}<br><small class="muted">${esc(x.description||'')}</small></span><span>${money(x.amount)}<br><small>${esc(x.status)}</small></span></div>`
+    ).join('')||t('empty');
+  }catch(e){
+    console.log('Wallet refresh failed:',e);
+  }
+}
+
+async function deposit(){
+  try{
+    const amount=Number(document.getElementById('amount').value);
+    const reference=document.getElementById('reference').value.trim();
+    const message=document.getElementById('paymentMessage').value.trim();
+    if(!amount||amount<=0)throw Error('Enter the exact amount you deposited.');
+    if(reference.length<5 && message.length<8)throw Error('Enter a transaction reference/receipt link or paste the full confirmation SMS.');
+    const result=await api('/api/deposits',{
+      method:'POST',
+      body:JSON.stringify({provider:document.getElementById('provider').value,amount,reference:reference||null,message})
+    });
+    msg(`Deposit request #${result.id}: ${result.message || ('Status: '+result.status)}${result.status==='verified'?' Wallet credited.':''}`,result.status!=='verified');
+    document.getElementById('paymentMessage').value='';
+    document.getElementById('reference').value='';
+    await refreshWallet();
+  }catch(e){msg(e.message,true);}
+}
+
+function walletTab(tab){
+  document.querySelectorAll('[data-wallet-tab]').forEach(b=>b.classList.toggle('active',b.dataset.walletTab===tab));
+  document.querySelectorAll('.wallet-pane').forEach(p=>p.classList.toggle('active',p.id===tab+'Pane'));
+}
+const depositRecipients=[
+ {title:'Nahom Million',detail:'0943912235',provider:'Phone recipient'},
+ {title:'Tewdros Getu',detail:'0937189718',provider:'Phone recipient'},
+ {title:'Tinsae Merga',detail:'0934417096',provider:'Phone recipient'},
+ {title:'CBE Bank',detail:'1000261740528',provider:'CBE account'}
+];
+function chooseProvider(p){document.getElementById('provider').value=p;document.querySelectorAll('[data-provider-brand]').forEach(b=>b.classList.toggle('active',b.dataset.providerBrand===p));showDepositDetails();}
+function showDepositDetails(){
+ const p=document.getElementById('provider').value;document.querySelectorAll('[data-provider-brand]').forEach(b=>b.classList.toggle('active',b.dataset.providerBrand===p));
+ const host=document.getElementById('depositDetails');
+ if(p==='ebirr'||p==='mpesa'){
+  host.innerHTML=`<div class="notice">${p==='ebirr'?'eBirr':'M-Pesa'} is selectable, but its receiving account/phone has not been configured yet. Do not send money until the owner supplies and confirms the correct recipient details.</div>`;
+  return;
+ }
+ const rows=p==='cbe_bank'?depositRecipients.filter(x=>x.title==='CBE Bank'):depositRecipients.filter(x=>x.title==='Nahom Million');
+ host.innerHTML=rows.map(x=>`<div class="provider-row"><div class="provider-logo">${x.title==='CBE Bank'?'<img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/commercial_bank_of_ethiopia/commercial_bank_of_ethiopia.svg" alt="CBE logo">':'<img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/tele_birr/tele_birr.svg" alt="Telebirr logo">'}</div><div class="details"><b>${esc(x.title)}</b><div class="muted small">${esc(x.detail)}</div><small class="muted">${esc(x.provider)}</small></div><button class="copy-small" onclick="copyValue('${x.detail}')">Copy</button></div>`).join('');
+}
+async function copyValue(value){
+ try{
+  const webApp=telegramApp();
+  if(webApp?.clipboard?.writeText)await webApp.clipboard.writeText(value);
+  else await navigator.clipboard.writeText(value);
+  msg('Copied: '+value);
+ }catch(e){msg('Copy failed. Please copy manually: '+value,true);}
+}
+function updateWithdrawDestination(){
+ const p=document.getElementById('withdrawProvider').value;
+ const bank=p==='cbe_bank';
+ document.getElementById('withdrawDestinationLabel').textContent=bank?'CBE account number':'Phone number';
+ document.getElementById('withdrawDestination').placeholder=bank?'Enter CBE account number':'Enter phone number';
+}
+document.getElementById('transferMethod').addEventListener('change',()=>{
+ const phone=document.getElementById('transferMethod').value==='phone';
+ document.getElementById('transferRecipientLabel').textContent=phone?'Player phone number':'Telegram username';
+ document.getElementById('transferRecipient').placeholder=phone?'Enter registered phone number':'Enter @username';
+});
+async function withdraw(){
+ try{
+  const amount=Number(document.getElementById('withdrawAmount').value);
+  const provider=document.getElementById('withdrawProvider').value;
+  const destination=document.getElementById('withdrawDestination').value.trim();
+  if(!amount||amount<=0||!destination)throw Error('Enter an amount and destination details.');
+  const label=provider==='cbe_bank'?'CBE account':'phone number';
+  if(!confirm(`Submit withdrawal of ${money(amount)} using ${provider}? Check your ${label}.`))return;
+  const d=await api('/api/withdrawals',{method:'POST',body:JSON.stringify({amount,provider,destination})});
+  msg(d.message||'Withdrawal request submitted.');
+  document.getElementById('withdrawAmount').value='';
+  document.getElementById('withdrawDestination').value='';
+  await refreshWallet();
+ }catch(e){msg(e.message,true);}
+}
+async function transfer(){
+ try{
+  const method=document.getElementById('transferMethod').value;
+  const recipient=document.getElementById('transferRecipient').value.trim();
+  const amount=Number(document.getElementById('transferAmount').value);
+  if(!recipient||!amount||amount<=0)throw Error('Enter a recipient and transfer amount.');
+  const label=method==='phone'?'phone number':'Telegram username';
+  if(!confirm(`Transfer ${money(amount)} to the player found by ${label} ${recipient}?`))return;
+  const d=await api('/api/transfers',{method:'POST',body:JSON.stringify({method,recipient,amount})});
+  msg(`Transferred ${money(amount)} to ${d.recipient.name}.`);
+  document.getElementById('transferRecipient').value='';
+  document.getElementById('transferAmount').value='';
+  await refreshWallet();
+ }catch(e){msg(e.message,true);}
+}
+
+async function refreshLeaders(){
+  try{
+    const d=await api('/api/leaderboard');
+    document.getElementById('leaders').innerHTML=d.players.map((p,i)=>
+      `<div class="row" data-player-id="${p.telegram_id||''}"><b>${['🥇','🥈','🥉'][i]||'#'+(i+1)} ${esc(p.name)}</b><span class="gold">${p.wins} wins</span></div>`
+    ).join('')||t('empty');
+  }catch(e){
+    console.log('Leaderboard refresh failed:',e);
+  }
+}
+
+async function refreshMe(){
+  try{
+    me=await api('/api/me');
+    document.getElementById('refLink').value=me.referral_link;
+    document.getElementById('refCount').textContent=me.referrals;
+    document.getElementById('name').textContent=me.name;
+    document.getElementById('handle').textContent=me.username?'@'+me.username:'Telegram player';
+  }catch(e){
+    msg(e.message,true);
+  }
+}
+
+async function copyLink(){
+  try{
+    const link=document.getElementById('refLink').value;
+    const webApp=telegramApp();
+    if(webApp?.clipboard?.writeText)await webApp.clipboard.writeText(link);
+    else await navigator.clipboard.writeText(link);
+    msg(t('copied'));
+  }catch(e){
+    msg('Copy link manually.',true);
+  }
+}
+
+if(tg?.BackButton){
+  tg.BackButton.onClick(()=>go('home'));
+}
+
+/* Start the Mini App only after giving Telegram's bridge a moment to load. */
+boot();
+</script>
+</body>
+</html>
