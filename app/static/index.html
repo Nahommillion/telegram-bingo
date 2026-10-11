@@ -164,10 +164,10 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
   </select>
   <div id="depositDetails" class="provider-list"></div>
   <label class="small muted">Amount you deposited (Birr)</label><input class="field" id="amount" type="number" min="1" step="0.01" placeholder="Enter the exact amount, e.g. 100">
-  <label class="small muted">Paste the complete payment confirmation SMS</label><textarea class="field sms-box" id="paymentMessage" rows="5" placeholder="Paste the whole message received from Telebirr, CBE, eBirr or M-Pesa"></textarea>
-  <label class="small muted">Transaction/reference code (optional if included in SMS)</label><input class="field" id="reference" placeholder="Can be left blank if SMS contains a reference">
-  <button class="primary" onclick="deposit()" id="submitDeposit">Check message & submit deposit</button>
-  <p class="muted small" id="depositHelp">The app checks the SMS amount and attempts independent receipt verification. Telebirr may credit automatically if the receipt, amount, currency, recipient, and unique reference all verify. eBirr needs a trusted payment record; copied SMS alone never triggers wallet credit.</p>
+  <label class="small muted">Paste the official receipt link or complete payment SMS</label><textarea class="field sms-box" id="paymentMessage" rows="5" placeholder="Paste the official receipt link, or the full payment confirmation SMS"></textarea>
+  <label class="small muted">Transaction/reference code (optional if included in the link or SMS)</label><input class="field" id="reference" placeholder="Optional if the receipt link or SMS contains a reference">
+  <button class="primary" onclick="deposit()" id="submitDeposit">Verify receipt & submit deposit</button>
+  <p class="muted small" id="depositHelp">Check.et verifies the receipt. Your wallet is credited only when the verified amount and approved receiving account match. eBirr is not currently listed as a supported Check.et API provider, so eBirr requests stay pending.</p>
  </div>
  <div class="panel wallet-pane" id="withdrawPane">
   <h3>⬆️ Withdraw money</h3>
@@ -272,9 +272,9 @@ const strings = {
     stakeLabel:'Bet per cartela (minimum 30 Birr)',yourCard:'Your Cartela',
     calledTitle:'📣 Called Numbers',bingo:'🏆 BINGO!',
     walletTitle:'💳 Wallet & Deposits',currentBalLabel:'CURRENT BALANCE',
-    autoNote:'Automatic verification requires an authorized provider or account integration to send transaction records to this server.',
-    depositReq:'➕ Create Deposit Request',submitDeposit:'Submit Deposit Request',
-    depositHelp:'Balance is credited only when a trusted transaction record matches the provider, amount and reference.',
+    autoNote:'Paste the official receipt link or payment SMS below. Check.et verifies it; the app credits your wallet only after amount and approved recipient checks pass.',
+    depositReq:'➕ Create Deposit Request',submitDeposit:'Verify Receipt & Submit',
+    depositHelp:'Check.et verifies receipt links or payment text. Wallet credit requires a matching amount and approved receiving account. eBirr is not currently supported by its API.',
     txTitle:'📜 Transaction History',leaderTitle:'🏆 Leaderboard',
     inviteTitle:'👥 Invite Friends',
     inviteText:'Friends must open your link and press Start to register.',
@@ -309,10 +309,10 @@ const strings = {
     calledTitle:'📣 የተጠሩ ቁጥሮች',bingo:'🏆 ቢንጎ!',
     walletTitle:'💳 ሂሳብና ተቀማጭ',
     currentBalLabel:'የአሁኑ ሂሳብ',
-    autoNote:'ራስ-ሰር ማረጋገጫ ለመስራት የተፈቀደ የክፍያ አቅራቢ ወይም የሂሳብ ግንኙነት የግብይት መዝገቦችን ወደ ሰርቨሩ መላክ አለበት።',
+    autoNote:'የክፍያ ደረሰኝ ሊንክ ወይም SMS ከታች ያስገቡ። Check.et ያረጋግጣል፤ መጠኑና ተቀባዩ ከተረጋገጡ ብቻ ሂሳብ ይጨምራል።',
     depositReq:'➕ የተቀማጭ ጥያቄ ይፍጠሩ',
-    submitDeposit:'ጥያቄ ላክ',
-    depositHelp:'የተፈቀደ መዝገብ ከአቅራቢ፣ መጠንና ማጣቀሻ ጋር ካልተዛመደ ሂሳብ አይጨምርም።',
+    submitDeposit:'ደረሰኝ አረጋግጥና ላክ',
+    depositHelp:'Check.et የክፍያ ሊንክ ወይም ጽሑፍ ያረጋግጣል። የተረጋገጠው መጠንና ተቀባይ ሂሳብ ከተዛመዱ ብቻ ቀሪ ሂሳብ ይጨምራል። eBirr በአሁኑ ጊዜ በAPI አይደገፍም።',
     txTitle:'📜 የግብይት ታሪክ',
     leaderTitle:'🏆 ደረጃ ሰንጠረዥ',
     inviteTitle:'👥 ጓደኞችን ይጋብዙ',
@@ -628,7 +628,7 @@ async function deposit(){
     const reference=document.getElementById('reference').value.trim();
     const message=document.getElementById('paymentMessage').value.trim();
     if(!amount||amount<=0)throw Error('Enter the exact amount you deposited.');
-    if(message.length<8)throw Error('Paste the complete payment confirmation message first.');
+    if(message.length<8)throw Error('Paste the official receipt link or complete payment confirmation SMS first.');
     const result=await api('/api/deposits',{
       method:'POST',
       body:JSON.stringify({provider:document.getElementById('provider').value,amount,reference:reference||null,message})
