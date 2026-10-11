@@ -20,7 +20,7 @@ SUPPORT=os.getenv("SUPPORT_URL","").strip(); PAYKEY=os.getenv("PAYMENT_INGEST_AP
 STATIC=Path(__file__).parent/"static"; STATIC.mkdir(exist_ok=True)
 engine=bot=None; ticker=None; lock=asyncio.Lock()
 g={"id":1,"status":"waiting","seconds":30,"called":[],"players":{},"winner":None,"seq":[],"last":0,"lobby_started_at":None,"finished_at_ts":0}
-PROVIDERS={"telebirr","cbe_birr","ebirr","cbe_bank"}
+PROVIDERS={"telebirr","cbe_birr","ebirr","cbe_bank","mpesa"}
 def dsn(x):
  if x.startswith("postgres://"): return x.replace("postgres://","postgresql+asyncpg://",1)
  if x.startswith("postgresql://") and not x.startswith("postgresql+asyncpg://"): return x.replace("postgresql://","postgresql+asyncpg://",1)
@@ -38,6 +38,8 @@ async def dbinit():
  "CREATE TABLE IF NOT EXISTS bingo_referrals(id BIGSERIAL PRIMARY KEY,referrer_telegram_id BIGINT,referred_telegram_id BIGINT UNIQUE,created_at TIMESTAMPTZ DEFAULT NOW())",
  "ALTER TABLE bingo_referrals ADD COLUMN IF NOT EXISTS referrer_telegram_id BIGINT",
  "CREATE TABLE IF NOT EXISTS deposit_requests(id BIGSERIAL PRIMARY KEY,telegram_id BIGINT,provider TEXT,amount NUMERIC(14,2),reference TEXT,status TEXT DEFAULT 'pending',created_at TIMESTAMPTZ DEFAULT NOW(),verified_at TIMESTAMPTZ)",
+  "ALTER TABLE deposit_requests ADD COLUMN IF NOT EXISTS payment_message TEXT",
+  "ALTER TABLE deposit_requests ADD COLUMN IF NOT EXISTS parsed_message_amount NUMERIC(14,2)",
   "CREATE TABLE IF NOT EXISTS withdrawal_requests(id BIGSERIAL PRIMARY KEY,telegram_id BIGINT NOT NULL,provider TEXT NOT NULL,amount NUMERIC(14,2) NOT NULL,destination TEXT NOT NULL,status TEXT DEFAULT 'pending',created_at TIMESTAMPTZ DEFAULT NOW(),processed_at TIMESTAMPTZ)",
  "CREATE TABLE IF NOT EXISTS payment_records(id BIGSERIAL PRIMARY KEY,provider TEXT,external_reference TEXT UNIQUE,amount NUMERIC(14,2),payer_reference TEXT,memo TEXT,matched_request_id BIGINT,created_at TIMESTAMPTZ DEFAULT NOW())",
  "CREATE TABLE IF NOT EXISTS bingo_games(id BIGSERIAL PRIMARY KEY,status TEXT,created_at TIMESTAMPTZ DEFAULT NOW(),started_at TIMESTAMPTZ,finished_at TIMESTAMPTZ,winner_telegram_id BIGINT,called_numbers JSONB DEFAULT '[]'::jsonb)",
@@ -147,7 +149,7 @@ async def bottext(up,ctx):
  elif a=="language":await setlang(u.id,"am" if l=="en" else "en");await sendwel(up,"am" if l=="en" else "en")
  elif a in ("leaders","history"):
   async with engine.connect() as c:
-   if a=="leaders":r=await c.execute(text("SELECT COALESCE(u.display_name,'Player'),COUNT(*) FROM bingo_games g JOIN bingo_users u ON u.telegram_id=g.winner_telegram_id GROUP BY u.display_name ORDER BY COUNT(*) DESC LIMIT 10"));rows=r.fetchall();out="🏆 Leaderboard\n"+("\n".join(f"{i+1}. {x[0]} — {x[1]}" for i,x in enumerate(rows)) if rows else "No winners yet.")
+   if a=="leaders":r=await c.execute(text("SELECT COALESCE(NULLIF(MAX(u.display_name),''),NULLIF(MAX(u.username),''),'Player'),COUNT(DISTINCT g.id) FROM bingo_games g JOIN bingo_users u ON u.telegram_id=g.winner_telegram_id WHERE g.winner_telegram_id IS NOT NULL GROUP BY u.telegram_id ORDER BY COUNT(DISTINCT g.id) DESC LIMIT 10"));rows=r.fetchall();out="🏆 Leaderboard\n"+("\n".join(f"{i+1}. {x[0]} — {x[1]}" for i,x in enumerate(rows)) if rows else "No winners yet.")
    else:r=await c.execute(text("SELECT transaction_type,amount,status FROM bingo_transactions WHERE telegram_id=:i ORDER BY id DESC LIMIT 10"),{"i":u.id});rows=r.fetchall();out="📜 Transactions\n"+("\n".join(f"{x[0]} · {x[1]} · {x[2]}" for x in rows) if rows else "No transactions yet.")
   await m.reply_text(out,reply_markup=kb(l))
 def auth(init):
@@ -237,12 +239,28 @@ async def language(req:Request):
 async def getgame(req:Request):
  u=await who(req);uid=int(u["id"])
  async with lock:
+  # PostgreSQL is the shared source of truth for cartela reservations. Refresh on
+  # every poll so all players see reservations made by other users immediately.
+  async with engine.connect() as c:
+   state=(await c.execute(text("SELECT status,called_numbers,lobby_started_at,winner_telegram_id FROM bingo_games WHERE id=:g"),{"g":g["id"]})).first()
+   if state:
+    g["status"]=state[0]
+    g["called"]=state[1] or []
+    if state[2] and g["lobby_started_at"] is None:g["lobby_started_at"]=state[2].timestamp()
+    pr=await c.execute(text("SELECT p.telegram_id,COALESCE(NULLIF(u.display_name,''),NULLIF(u.username,''),'Player'),p.cartela_number,p.cartela,p.stake FROM bingo_game_entries p LEFT JOIN bingo_users u ON u.telegram_id=p.telegram_id WHERE p.game_id=:g ORDER BY p.cartela_number"),{"g":g["id"]})
+    fresh={}
+    for x in pr.fetchall():
+     card=x[3] if isinstance(x[3],list) else json.loads(x[3] or '[]')
+     fresh[f"{int(x[0])}:{int(x[2])}"]={"user_id":int(x[0]),"name":x[1],"n":int(x[2]),"card":card,"stake":float(x[4] or 0)}
+    g["players"]=fresh
   if g["status"]=="waiting" and g["lobby_started_at"] is not None:
    g["seconds"]=max(0,math.ceil(30-(time.time()-g["lobby_started_at"])))
   entries=list(g["players"].values())
   mine=[{"cartela":p["card"],"cartela_number":p["n"],"stake":p["stake"]} for p in entries if p.get("user_id")==uid]
   users={p.get("user_id") for p in entries}
-  return {"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"players":[{"telegram_id":p.get("user_id"),"name":p["name"],"cartela_number":p["n"],"stake":p["stake"]} for p in entries],"player_count":len(users),"my_cartelas":mine,"my_cartela":mine[0]["cartela"] if mine else None,"my_cartela_number":mine[0]["cartela_number"] if mine else None,"winner":g["winner"]}
+  total_bets=sum((Decimal(str(p["stake"])) for p in entries),Decimal("0.00"))
+  prize=(total_bets*Decimal("0.80")).quantize(Decimal("0.01"))
+  return {"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"players":[{"telegram_id":p.get("user_id"),"name":p["name"],"cartela_number":p["n"],"stake":p["stake"]} for p in entries],"player_count":len(users),"total_bets":float(total_bets),"prize_amount":float(prize),"owner_share":float((total_bets-prize).quantize(Decimal("0.01"))),"my_cartelas":mine,"my_cartela":mine[0]["cartela"] if mine else None,"my_cartela_number":mine[0]["cartela_number"] if mine else None,"winner":g["winner"]}
 class Join(BaseModel):
  cartela_numbers:list[int]=Field(default_factory=list)
  cartela_number:Optional[int]=Field(default=None,ge=1,le=200)
@@ -306,10 +324,15 @@ async def claim(req:Request):
   prize=(pot*Decimal("0.80")).quantize(Decimal("0.01"));commission=(pot-prize).quantize(Decimal("0.01"))
   g["winner"]={"telegram_id":uid,"name":p["name"],"cartela_number":p["n"],"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"commission":float(commission)};g["status"]="finished";g["finished_at_ts"]=time.time()
   async with engine.begin() as c:
-   await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),winner_telegram_id=:u,called_numbers=CAST(:n AS jsonb) WHERE id=:g"),{"u":uid,"n":json.dumps(g["called"]),"g":g["id"]})
+   # Atomic conditional update prevents two simultaneous BINGO claims from
+   # paying the same round twice, including across app workers/restarts.
+   won=(await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),winner_telegram_id=:u,called_numbers=CAST(:n AS jsonb) WHERE id=:g AND status='running' AND winner_telegram_id IS NULL RETURNING id"),{"u":uid,"n":json.dumps(g["called"]),"g":g["id"]})).scalar_one_or_none()
+   if won is None:
+    raise HTTPException(409,"This game has already been won. Refresh for the result.")
    if prize:
-    await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":prize,"u":uid})
-    await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:u,'win',:a,'verified',:d)"),{"u":uid,"a":prize,"d":f"Bingo prize (80% of {pot} Birr total bets)"})
+    txid=(await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'win',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{"u":uid,"a":prize,"d":f"Bingo prize (80% of {pot} Birr total bets)","r":f"bingo:game:{g['id']}:winner"})).scalar_one_or_none()
+    if txid is not None:
+     await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":prize,"u":uid})
    if commission and OWNER_ID.isdigit():
     owner=int(OWNER_ID)
     await c.execute(text("INSERT INTO bingo_users(telegram_id,display_name) VALUES(:i,'Platform Owner') ON CONFLICT(telegram_id) DO NOTHING"),{"i":owner})
@@ -330,13 +353,46 @@ async def wallet(req:Request):
   ts=(await c.execute(text("SELECT transaction_type,amount,status,description,created_at FROM bingo_transactions WHERE telegram_id=:i ORDER BY id DESC LIMIT 20"),{"i":i})).fetchall()
  return {"balance":float(bal),"available_balance":float(Decimal(str(bal))-Decimal(str(pending or 0))),"deposits":[{"id":x[0],"provider":x[1],"amount":float(x[2]),"reference":x[3],"status":x[4],"created_at":x[5].isoformat()} for x in ds],"withdrawals":[{"id":x[0],"provider":x[1],"amount":float(x[2]),"destination":x[3],"status":x[4],"created_at":x[5].isoformat()} for x in ws],"transactions":[{"type":x[0],"amount":float(x[1]),"status":x[2],"description":x[3],"created_at":x[4].isoformat()} for x in ts]}
 class Dep(BaseModel):
- provider:str;amount:Decimal=Field(gt=0,le=Decimal("1000000"));reference:str=Field(min_length=3,max_length=200)
+ provider:str
+ amount:Decimal=Field(gt=0,le=Decimal("1000000"))
+ message:str=Field(min_length=8,max_length=5000)
+ reference:Optional[str]=Field(default=None,max_length=200)
+
+def parse_sms_amount(message:str):
+ # Parse an amount only when the SMS labels it or attaches a currency/unit.
+ patterns=[
+  r"(?i)(?:amount|paid|payment|received|credited|deposit(?:ed)?|transfer(?:red)?)\s*(?:is|of|:|=)?\s*(?:ETB|Birr|ብር)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:ETB|Birr|ብር)",
+  r"(?i)(?:ETB|Birr|ብር)\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)",
+  r"(?i)([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s*(?:ETB|Birr|ብር)"
+ ]
+ for pattern in patterns:
+  m=re.search(pattern,message)
+  if m:
+   try:return Decimal(m.group(1).replace(',','')).quantize(Decimal('0.01'))
+   except Exception:pass
+ return None
+
+def parse_sms_reference(message:str):
+ patterns=[r"(?i)(?:transaction|txn|trans(?:action)?\s*id|reference|ref(?:erence)?\s*(?:no|number|#)?|receipt(?:\s*(?:no|number|#))?)\s*[:#= -]+([A-Z0-9-]{5,})"]
+ for pattern in patterns:
+  m=re.search(pattern,message)
+  if m:return m.group(1).strip()[:200]
+ return None
+
 @app.post("/api/deposits")
 async def deposit(b:Dep,req:Request):
  u=await who(req);p=b.provider.lower()
  if p not in PROVIDERS:raise HTTPException(400,"Unknown provider.")
- async with engine.begin() as c:r=await c.execute(text("INSERT INTO deposit_requests(telegram_id,provider,amount,reference) VALUES(:i,:p,:a,:r) RETURNING id"),{"i":int(u["id"]),"p":p,"a":b.amount,"r":b.reference})
- return {"ok":True,"id":r.scalar_one(),"status":"pending"}
+ if not b.message.strip():raise HTTPException(400,"Paste the complete payment confirmation message.")
+ parsed=parse_sms_amount(b.message)
+ if parsed is None:raise HTTPException(400,"I could not find a clear Birr amount in that message. Paste the complete confirmation SMS exactly as received.")
+ entered=b.amount.quantize(Decimal('0.01'))
+ if parsed != entered:raise HTTPException(400,f"Amount mismatch: you entered {entered} Birr, but the message appears to show {parsed} Birr. Check the amount and paste the full message.")
+ ref=(b.reference or parse_sms_reference(b.message) or ('SMS-'+hashlib.sha256(b.message.encode()).hexdigest()[:16])).strip()[:200]
+ async with engine.begin() as c:
+  r=await c.execute(text("INSERT INTO deposit_requests(telegram_id,provider,amount,reference,payment_message,parsed_message_amount) VALUES(:i,:p,:a,:r,:m,:pa) RETURNING id"),{"i":int(u["id"]),"p":p,"a":entered,"r":ref,"m":b.message.strip(),"pa":parsed})
+ rid=r.scalar_one()
+ return {"ok":True,"id":rid,"status":"pending","parsed_amount":float(parsed),"reference":ref,"message":"The amount in your pasted SMS matches your entered amount. Your deposit is pending verification; the pasted SMS alone is not proof of payment."}
 class Withdrawal(BaseModel):
  provider:str
  amount:Decimal=Field(gt=0,le=Decimal("1000000"))
@@ -344,7 +400,7 @@ class Withdrawal(BaseModel):
 @app.post("/api/withdrawals")
 async def withdrawal(b:Withdrawal,req:Request):
  u=await who(req);i=int(u["id"]);p=b.provider.lower()
- if p not in ("telebirr","cbe_bank","ebirr"):raise HTTPException(400,"Choose Telebirr, CBE Bank, or eBirr.")
+ if p not in ("telebirr","cbe_bank","ebirr","mpesa"):raise HTTPException(400,"Choose Telebirr, CBE Bank, eBirr, or M-Pesa.")
  dest=re.sub(r"[^A-Za-z0-9+@._ -]","",b.destination).strip()
  if p=="cbe_bank":
   if len(re.sub(r"\D","",dest))<8:raise HTTPException(400,"Enter a valid CBE account number.")
@@ -392,16 +448,26 @@ async def payment(b:Payment,x_payment_api_key:str=Header(default="")):
  p=b.provider.lower()
  if p not in PROVIDERS:raise HTTPException(400,"Unknown provider.")
  async with engine.begin() as c:
-  await c.execute(text("INSERT INTO payment_records(provider,external_reference,amount,payer_reference,memo) VALUES(:p,:r,:a,:pr,:m) ON CONFLICT(external_reference) DO NOTHING"),{"p":p,"r":b.external_reference,"a":b.amount,"pr":b.payer_reference,"m":b.memo})
+  inserted=(await c.execute(text("INSERT INTO payment_records(provider,external_reference,amount,payer_reference,memo) VALUES(:p,:r,:a,:pr,:m) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{"p":p,"r":b.external_reference,"a":b.amount,"pr":b.payer_reference,"m":b.memo})).scalar_one_or_none()
+  existing=(await c.execute(text("SELECT matched_request_id FROM payment_records WHERE external_reference=:r FOR UPDATE"),{"r":b.external_reference})).first()
+  if existing and existing[0] is not None:
+   return {"ok":True,"matched":True,"duplicate":True,"request_id":existing[0],"message":"This payment reference was already processed; no second wallet credit was made."}
   x=(await c.execute(text("SELECT id,telegram_id,amount,reference FROM deposit_requests WHERE provider=:p AND status='pending' AND amount=:a AND (reference=:r OR reference=:pr OR POSITION(reference IN COALESCE(:m,''))>0) ORDER BY id LIMIT 1 FOR UPDATE"),{"p":p,"a":b.amount,"r":b.external_reference,"pr":b.payer_reference,"m":b.memo or ""})).first()
   if x:
-   await c.execute(text("UPDATE deposit_requests SET status='verified',verified_at=NOW() WHERE id=:i"),{"i":x[0]});await c.execute(text("UPDATE payment_records SET matched_request_id=:i WHERE external_reference=:r"),{"i":x[0],"r":b.external_reference});await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a WHERE telegram_id=:u"),{"a":x[2],"u":x[1]});await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'deposit',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING"),{"u":x[1],"a":x[2],"d":f"Verified {p} deposit #{x[0]}","r":b.external_reference});return {"ok":True,"matched":True,"request_id":x[0]}
+   matched=(await c.execute(text("UPDATE payment_records SET matched_request_id=:i WHERE external_reference=:r AND matched_request_id IS NULL RETURNING id"),{"i":x[0],"r":b.external_reference})).scalar_one_or_none()
+   if matched is None:
+    return {"ok":True,"matched":False,"duplicate":True,"message":"This payment reference was already handled; no wallet credit was made."}
+   await c.execute(text("UPDATE deposit_requests SET status='verified',verified_at=NOW() WHERE id=:i AND status='pending'"),{"i":x[0]})
+   await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a WHERE telegram_id=:u"),{"a":x[2],"u":x[1]})
+   await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'deposit',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING"),{"u":x[1],"a":x[2],"d":f"Verified {p} deposit #{x[0]}","r":f"payment:{b.external_reference}"})
+   return {"ok":True,"matched":True,"request_id":x[0]}
  return {"ok":True,"matched":False,"message":"Stored but no exact pending request matched."}
 @app.get("/api/leaderboard")
 async def leaderboard(req:Request):
  await who(req)
- async with engine.connect() as c:r=await c.execute(text("SELECT COALESCE(u.display_name,'Player'),COUNT(*) FROM bingo_games g JOIN bingo_users u ON u.telegram_id=g.winner_telegram_id GROUP BY u.display_name ORDER BY COUNT(*) DESC LIMIT 50"));rows=r.fetchall()
- return {"players":[{"name":x[0],"wins":x[1]} for x in rows]}
+ async with engine.connect() as c:
+  r=await c.execute(text("SELECT u.telegram_id,COALESCE(NULLIF(MAX(u.display_name),''),NULLIF(MAX(u.username),''),'Player'),COUNT(DISTINCT g.id) AS wins FROM bingo_games g JOIN bingo_users u ON u.telegram_id=g.winner_telegram_id WHERE g.winner_telegram_id IS NOT NULL GROUP BY u.telegram_id ORDER BY wins DESC,MIN(g.finished_at) ASC NULLS LAST LIMIT 50"));rows=r.fetchall()
+ return {"players":[{"telegram_id":int(x[0]),"name":x[1],"wins":int(x[2])} for x in rows]}
 @app.websocket("/ws/game")
 async def ws(ws:WebSocket):
  await ws.accept()
