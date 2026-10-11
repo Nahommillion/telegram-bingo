@@ -1,4 +1,4 @@
-import os,json,asyncio,random,hmac,hashlib,urllib.parse,time,secrets,logging,math,re
+import os,json,asyncio,random,hmac,hashlib,urllib.parse,time,secrets,logging,math,re,urllib.request,urllib.error
 from contextlib import asynccontextmanager
 from pathlib import Path
 from decimal import Decimal
@@ -373,26 +373,122 @@ def parse_sms_amount(message:str):
  return None
 
 def parse_sms_reference(message:str):
- patterns=[r"(?i)(?:transaction|txn|trans(?:action)?\s*id|reference|ref(?:erence)?\s*(?:no|number|#)?|receipt(?:\s*(?:no|number|#))?)\s*[:#= -]+([A-Z0-9-]{5,})"]
+ # Match both English and the Amharic Telebirr wording "ቁጥርዎ DJB6NO8RXQ".
+ patterns=[
+  r"(?i)(?:transaction|txn|trans(?:action)?\s*id|reference|ref(?:erence)?\s*(?:no|number|#)?|receipt(?:\s*(?:no|number|#))?)\s*[:#= -]+([A-Z0-9-]{5,})",
+  r"ቁጥርዎ\s*[:#= -]*([A-Z0-9-]{5,})",
+  r"(?i)receipt/([A-Z0-9-]{5,})"
+ ]
  for pattern in patterns:
   m=re.search(pattern,message)
   if m:return m.group(1).strip()[:200]
  return None
 
+ALLOWED_RECIPIENTS={
+ "0943912235":"Nahom Million",
+ "0937189718":"Tewdros Getu",
+ "0934417096":"Tinsae Merga",
+}
+
+def _cheki_verify_sync(payload):
+ data=json.dumps(payload).encode("utf-8")
+ req=urllib.request.Request("https://cheki.et/api/verify",data=data,headers={"Content-Type":"application/json","Accept":"application/json","User-Agent":"CartelaBingo/1.0"},method="POST")
+ with urllib.request.urlopen(req,timeout=12) as resp:
+  raw=resp.read(200000)
+  return json.loads(raw.decode("utf-8"))
+
+async def _cheki_verify(payload):
+ try:
+  result=await asyncio.to_thread(_cheki_verify_sync,payload)
+  if not isinstance(result,dict):return None
+  return result
+ except Exception as exc:
+  logger.warning("Receipt verification service unavailable: %s",type(exc).__name__)
+  return None
+
+def _field(data,*names):
+ for name in names:
+  value=data.get(name)
+  if value not in (None,""):return value
+ return None
+
+def _receiver_matches(data):
+ receiver=_field(data,"receiverAccount","receiver_account","receiverPhone","receiver_phone","recipientAccount","recipientPhone","receiver")
+ digits=re.sub(r"\D","",str(receiver or ""))
+ if digits and any(digits.endswith(re.sub(r"\D","",phone)[-9:]) for phone in ALLOWED_RECIPIENTS):return True
+ name=str(_field(data,"receiverName","receiver_name","recipientName","recipient_name") or "").strip().casefold()
+ return bool(name and any(name==recipient.casefold() for recipient in ALLOWED_RECIPIENTS.values()))
+
+async def _credit_verified_deposit(uid,provider,amount,reference,payment_message):
+ # One DB transaction and a unique ledger reference prevent concurrent/replayed credits.
+ ledger_ref=f"deposit:{provider}:{reference}"
+ async with engine.begin() as c:
+  prior=(await c.execute(text("SELECT id FROM bingo_transactions WHERE external_reference=:r"),{"r":ledger_ref})).scalar_one_or_none()
+  if prior is not None:return False
+  existing=(await c.execute(text("SELECT id,telegram_id,amount,status FROM deposit_requests WHERE provider=:p AND reference=:r ORDER BY id LIMIT 1 FOR UPDATE"),{"p":provider,"r":reference})).first()
+  if existing and int(existing[1]) != uid:
+   raise HTTPException(409,"This payment reference is already associated with another account. No wallet credit was made.")
+  if existing and Decimal(str(existing[2])).quantize(Decimal("0.01")) != amount:
+   raise HTTPException(409,"This payment reference was submitted with a different amount. No wallet credit was made.")
+  if existing:
+   rid=int(existing[0])
+   await c.execute(text("UPDATE deposit_requests SET status='verified',verified_at=NOW(),payment_message=:m,parsed_message_amount=:a WHERE id=:i AND status='pending'"),{"m":payment_message[:5000],"a":amount,"i":rid})
+  else:
+   rid=(await c.execute(text("INSERT INTO deposit_requests(telegram_id,provider,amount,reference,status,payment_message,parsed_message_amount,verified_at) VALUES(:u,:p,:a,:r,'verified',:m,:a,NOW()) RETURNING id"),{"u":uid,"p":provider,"a":amount,"r":reference,"m":payment_message[:5000]})).scalar_one()
+  txid=(await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'deposit',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{"u":uid,"a":amount,"d":f"Automatically verified {provider} deposit #{rid}","r":ledger_ref})).scalar_one_or_none()
+  if txid is None:
+   raise HTTPException(409,"This payment reference was already credited or is being processed. No duplicate credit was made.")
+  await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":amount,"u":uid})
+ return True
+
 @app.post("/api/deposits")
 async def deposit(b:Dep,req:Request):
  u=await who(req);p=b.provider.lower()
  if p not in PROVIDERS:raise HTTPException(400,"Unknown provider.")
- if not b.message.strip():raise HTTPException(400,"Paste the complete payment confirmation message.")
- parsed=parse_sms_amount(b.message)
+ message=b.message.strip()
+ if not message:raise HTTPException(400,"Paste the complete payment confirmation message.")
+ parsed=parse_sms_amount(message)
  if parsed is None:raise HTTPException(400,"I could not find a clear Birr amount in that message. Paste the complete confirmation SMS exactly as received.")
  entered=b.amount.quantize(Decimal('0.01'))
  if parsed != entered:raise HTTPException(400,f"Amount mismatch: you entered {entered} Birr, but the message appears to show {parsed} Birr. Check the amount and paste the full message.")
- ref=(b.reference or parse_sms_reference(b.message) or ('SMS-'+hashlib.sha256(b.message.encode()).hexdigest()[:16])).strip()[:200]
+ ref=(b.reference or parse_sms_reference(message) or '').strip()[:200]
+ if not ref:raise HTTPException(400,"Could not find a transaction reference in the SMS. Paste the complete original message or enter its reference code.")
+ uid=int(u["id"])
+ # A pasted SMS is untrusted. Telebirr is automatically credited only after the
+ # public verifier confirms the transaction, exact amount/currency and approved receiver.
+ if p=="telebirr":
+  verified=await _cheki_verify({"bank":"telebirr","reference":ref})
+  data=(verified.get("data") if verified and isinstance(verified.get("data"),dict) else verified) or {}
+  verified_amount=_field(data,"amount","transactionAmount","transaction_amount")
+  currency=str(_field(data,"currency","currencyCode","currency_code") or "ETB").upper()
+  try:verified_amount=Decimal(str(verified_amount).replace(",","")).quantize(Decimal("0.01"))
+  except Exception:verified_amount=None
+  if not verified or verified.get("success") is not True or verified.get("verified") is not True:
+   status_message="Receipt verification could not confirm this payment. It has been saved as pending; no wallet credit was made."
+  elif verified_amount != entered or currency not in ("ETB","BIRR"):
+   status_message="Verified receipt amount or currency did not match. Deposit remains pending; no wallet credit was made."
+  elif not _receiver_matches(data):
+   status_message="Receipt did not confirm one of the three approved recipient phone numbers. Deposit remains pending; no wallet credit was made."
+  else:
+   try:
+    credited=await _credit_verified_deposit(uid,p,entered,ref,message)
+   except HTTPException:raise
+   if not credited:raise HTTPException(409,"This transaction reference was already processed. No duplicate credit was made.")
+   return {"ok":True,"status":"verified","reference":ref,"parsed_amount":float(parsed),"message":"Payment independently verified. Your wallet has been credited automatically."}
+  async with engine.begin() as c:
+   exists=(await c.execute(text("SELECT id FROM deposit_requests WHERE provider=:p AND reference=:r AND status IN ('pending','verified') LIMIT 1"),{"p":p,"r":ref})).scalar_one_or_none()
+   if exists is not None:
+    return {"ok":True,"id":exists,"status":"pending","parsed_amount":float(parsed),"reference":ref,"message":"This reference already has a deposit request. No duplicate credit was made."}
+   rid=(await c.execute(text("INSERT INTO deposit_requests(telegram_id,provider,amount,reference,payment_message,parsed_message_amount) VALUES(:i,:p,:a,:r,:m,:pa) RETURNING id"),{"i":uid,"p":p,"a":entered,"r":ref,"m":message,"pa":parsed})).scalar_one()
+  return {"ok":True,"id":rid,"status":"pending","parsed_amount":float(parsed),"reference":ref,"message":status_message}
+ # eBirr/CBE/M-Pesa are not credited from pasted text. They are credited automatically
+ # when an authenticated trusted payment record arrives at /api/payments/records.
  async with engine.begin() as c:
-  r=await c.execute(text("INSERT INTO deposit_requests(telegram_id,provider,amount,reference,payment_message,parsed_message_amount) VALUES(:i,:p,:a,:r,:m,:pa) RETURNING id"),{"i":int(u["id"]),"p":p,"a":entered,"r":ref,"m":b.message.strip(),"pa":parsed})
- rid=r.scalar_one()
- return {"ok":True,"id":rid,"status":"pending","parsed_amount":float(parsed),"reference":ref,"message":"The amount in your pasted SMS matches your entered amount. Your deposit is pending verification; the pasted SMS alone is not proof of payment."}
+  exists=(await c.execute(text("SELECT id FROM deposit_requests WHERE provider=:p AND reference=:r LIMIT 1"),{"p":p,"r":ref})).scalar_one_or_none()
+  if exists is not None:return {"ok":True,"id":exists,"status":"pending","reference":ref,"message":"This reference already has a request. No duplicate credit was made."}
+  rid=(await c.execute(text("INSERT INTO deposit_requests(telegram_id,provider,amount,reference,payment_message,parsed_message_amount) VALUES(:i,:p,:a,:r,:m,:pa) RETURNING id"),{"i":uid,"p":p,"a":entered,"r":ref,"m":message,"pa":parsed})).scalar_one()
+ return {"ok":True,"id":rid,"status":"pending","parsed_amount":float(parsed),"reference":ref,"message":"SMS amount matches. The request is saved; automatic wallet credit will happen only when a trusted payment record confirms this reference, amount and approved recipient. The pasted SMS alone is not proof."}
+
 class Withdrawal(BaseModel):
  provider:str
  amount:Decimal=Field(gt=0,le=Decimal("1000000"))
