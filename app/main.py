@@ -354,6 +354,11 @@ async def claim(req:Request):
    elif commission:
     await c.execute(text("UPDATE bingo_platform_wallet SET balance=balance+:a,updated_at=NOW() WHERE id=1"),{"a":commission})
   return {"ok":True,"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"platform_commission":float(commission)}
+@app.get("/api/public-payment-methods")
+async def public_payment_methods():
+ # These are explicitly configured receiving numbers intended to be shown to depositors.
+ return {"mpesa_receivers": sorted(MPESA_RECEIVER_NUMBERS)}
+
 @app.get("/api/wallet")
 async def wallet(req:Request):
  u=await who(req);i=int(u["id"])
@@ -369,6 +374,7 @@ class Dep(BaseModel):
  amount:Decimal=Field(gt=0,le=Decimal("1000000"))
  message:str=Field(min_length=8,max_length=5000)
  reference:Optional[str]=Field(default=None,max_length=200)
+ account_number:Optional[str]=Field(default=None,max_length=100)
 
 def _checket_verify_sync(payload):
  data=json.dumps(payload).encode("utf-8")
@@ -526,12 +532,12 @@ async def _credit_verified_deposit(uid,provider,amount,reference,payment_message
   await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":amount,"u":uid})
  return True
 
-async def _verify_deposit_receipt(provider, reference, message):
+async def _verify_deposit_receipt(provider, reference, message, account_number=None):
  """Ask Check.et to verify the receipt using the selected payment provider."""
  provider=provider.lower()
  receipt_url=_receipt_link(message)
  if provider=="ebirr":
-  return None,{},"Check.et's documented API does not currently list eBirr. The request remains pending; no wallet credit was made."
+  return None,{},"Automatic eBirr credit is unavailable until a supported eBirr verification API is configured. No wallet credit was made."
  if provider not in ("telebirr","cbe_bank","cbe_birr","mpesa"):
   return None,{},"This payment type is not supported by Check.et. The request remains pending; no wallet credit was made."
  if not CHECK_ET_API_KEY:
@@ -556,6 +562,12 @@ async def _verify_deposit_receipt(provider, reference, message):
   return last,combined,None
 
  payload={"bank":bank}
+ if provider=="cbe_birr":
+  payer_account=re.sub(r"[^0-9+]","",str(account_number or "")).strip()
+  if len(re.sub(r"\D","",payer_account))<9:
+   return None,{},"For CBE Birr verification, enter the phone number used to make the payment. No wallet credit was made."
+  # Check.et requires account_number for CBE Birr; this is the payer's phone.
+  payload["account_number"]=payer_account
  if receipt_url:payload["receipt_url"]=receipt_url
  elif reference:payload["transaction_number"]=reference
  else:payload["receipt_text"]=message
@@ -574,7 +586,7 @@ async def deposit(b:Dep,req:Request):
  ref=lookup_ref or _verification_reference(None,None,message)
  uid=int(u["id"])
  # A URL/SMS/reference is only input to Check.et; it is never proof on its own.
- verified,data,unsupported_reason=await _verify_deposit_receipt(p,lookup_ref,message)
+ verified,data,unsupported_reason=await _verify_deposit_receipt(p,lookup_ref,message,b.account_number)
  data=data or {}
  receipt=data.get("receipt") if isinstance(data.get("receipt"),dict) else {}
  combined={**data,**receipt}
