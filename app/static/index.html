@@ -164,10 +164,10 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
   </select>
   <div id="depositDetails" class="provider-list"></div>
   <label class="small muted">Amount you deposited (Birr)</label><input class="field" id="amount" type="number" min="1" step="0.01" placeholder="Enter the exact amount, e.g. 100">
-  <label class="small muted">Paste the complete payment confirmation SMS</label><textarea class="field sms-box" id="paymentMessage" rows="5" placeholder="Paste the whole message received from Telebirr, CBE, eBirr or M-Pesa"></textarea>
-  <label class="small muted">Transaction/reference code (optional if included in SMS)</label><input class="field" id="reference" placeholder="Can be left blank if SMS contains a reference">
-  <button class="primary" onclick="deposit()" id="submitDeposit">Check message & submit deposit</button>
-  <p class="muted small" id="depositHelp">The app checks the amount written in the SMS against the amount you enter. The SMS itself cannot prove a real payment; funds stay pending until trusted provider verification or trusted payment-system verification.</p>
+  <label class="small muted">Transaction/reference code or Telebirr receipt link</label><input class="field" id="reference" placeholder="Paste the transaction code or https://transactioninfo.ethiotelecom.et/receipt/…">
+  <label class="small muted">Payment confirmation SMS (optional, helps compare the amount)</label><textarea class="field sms-box" id="paymentMessage" rows="5" placeholder="Paste the full payment confirmation SMS if available"></textarea>
+  <button class="primary" onclick="deposit()" id="submitDeposit">Verify receipt & submit deposit</button>
+  <p class="muted small" id="depositHelp">Telebirr receipts are checked when the public receipt page exposes the amount, successful status, and one of the authorized destinations. If details are missing, the request stays pending. CBE-only, eBirr and M-Pesa references are not auto-credited without trusted confirmation.</p>
  </div>
  <div class="panel wallet-pane" id="withdrawPane">
   <h3>⬆️ Withdraw money</h3>
@@ -627,13 +627,14 @@ async function deposit(){
     const reference=document.getElementById('reference').value.trim();
     const message=document.getElementById('paymentMessage').value.trim();
     if(!amount||amount<=0)throw Error('Enter the exact amount you deposited.');
-    if(message.length<8)throw Error('Paste the complete payment confirmation message first.');
+    if(reference.length<5 && message.length<8)throw Error('Enter a transaction reference/receipt link or paste the full confirmation SMS.');
     const result=await api('/api/deposits',{
       method:'POST',
       body:JSON.stringify({provider:document.getElementById('provider').value,amount,reference:reference||null,message})
     });
-    msg(`Deposit request #${result.id}: SMS amount matches ${money(result.parsed_amount)}. Status: PENDING verification. Your wallet is credited only after a trusted payment-system record confirms the transfer.`);
+    msg(`Deposit request #${result.id}: ${result.message || ('Status: '+result.status)}${result.status==='verified'?' Wallet credited.':''}`,result.status!=='verified');
     document.getElementById('paymentMessage').value='';
+    document.getElementById('reference').value='';
     await refreshWallet();
   }catch(e){msg(e.message,true);}
 }
