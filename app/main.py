@@ -356,8 +356,15 @@ async def claim(req:Request):
   return {"ok":True,"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"platform_commission":float(commission)}
 @app.get("/api/public-payment-methods")
 async def public_payment_methods():
- # These are explicitly configured receiving numbers intended to be shown to depositors.
- return {"mpesa_receivers": sorted(MPESA_RECEIVER_NUMBERS)}
+ # CBE Birr receiving numbers intentionally reuse the Telebirr phone numbers
+ # requested by the platform owner. They must also be registered to receive CBE Birr.
+ return {
+  "mpesa_receivers": sorted(MPESA_RECEIVER_NUMBERS),
+  "cbe_birr_receivers": [
+   {"name":name,"number":number}
+   for number,name in ALLOWED_RECIPIENTS.items()
+  ],
+ }
 
 @app.get("/api/wallet")
 async def wallet(req:Request):
@@ -389,18 +396,55 @@ def _checket_verify_sync(payload):
   return json.loads(resp.read(200000).decode("utf-8"))
 
 async def _checket_verify(payload):
+ """Verify with Check.et and preserve temporary outages as retryable states.
+
+ The caller/frontend may retry a temporary bank/API outage. A retry never
+ credits the wallet: only a confirmed completed payment can do that.
+ """
  if not CHECK_ET_API_KEY:
   logger.warning("CHECK_ET_API_KEY is not configured; receipt will not be auto-credited")
   return None
- try:
-  result=await asyncio.to_thread(_checket_verify_sync,payload)
-  return result if isinstance(result,dict) else None
- except urllib.error.HTTPError as exc:
-  logger.warning("Check.et verification returned HTTP %s",exc.code)
-  return None
- except Exception as exc:
-  logger.warning("Check.et verification unavailable: %s",type(exc).__name__)
-  return None
+ last_result=None
+ last_retryable=False
+ for attempt in range(3):
+  try:
+   result=await asyncio.to_thread(_checket_verify_sync,payload)
+   if not isinstance(result,dict):
+    last_result=None
+    retry=True
+    last_retryable=True
+   else:
+    last_result=result
+    msg=str(result.get("message") or result.get("error") or "").strip().lower()
+    transient_terms=("not answering","could not check","temporarily unavailable",
+                     "try again","timed out","timeout","service unavailable",
+                     "bank system","bank's system","connection error","could not reach")
+    retry=(result.get("success") is not True and any(term in msg for term in transient_terms))
+    last_retryable=retry
+    if not retry:
+     result.pop("_retryable",None)
+     return result
+  except urllib.error.HTTPError as exc:
+   retry=(exc.code == 429 or 500 <= exc.code <= 599)
+   last_retryable=retry
+   logger.warning("Check.et verification returned HTTP %s (attempt %s/3)",exc.code,attempt+1)
+   if not retry:
+    return None
+  except Exception as exc:
+   retry=True
+   last_retryable=True
+   logger.warning("Check.et verification unavailable: %s (attempt %s/3)",type(exc).__name__,attempt+1)
+  if retry and attempt < 2:
+   await asyncio.sleep(1.5 * (attempt + 1))
+ if last_result is not None:
+  logger.warning("Check.et still reports a temporary verification problem after retries")
+  last_result["_retryable"] = bool(last_retryable)
+  return last_result
+ if last_retryable:
+  return {"success":False,"exists":False,"duplicate":False,
+          "message":"Check.et or the bank is temporarily unavailable. Retry verification shortly.",
+          "_retryable":True}
+ return None
 
 def _checket_parts(result):
  data=result.get("data") if result and isinstance(result.get("data"),dict) else {}
@@ -616,7 +660,9 @@ async def deposit(b:Dep,req:Request):
     raise HTTPException(409,"This transaction reference was already processed. No duplicate credit was made.")
    return {"ok":True,"status":"verified","reference":ref,"parsed_amount":float(verified_amount),"message":"Check.et verified the payment and amount. Your Cartela Bingo wallet has been credited."}
  elif not verified:
-  status_message=unsupported_reason or "Check.et could not be reached or returned no verification. The request remains pending; no wallet credit was made."
+  status_message=unsupported_reason or "Check.et could not be reached. The deposit remains pending; no wallet credit was made."
+ elif verified.get("_retryable") is True:
+  status_message="The bank or Check.et is temporarily unavailable. Your deposit remains pending and verification will retry automatically. No wallet credit has been made yet."
  else:
   status_message=unsupported_reason or "Check.et could not confirm this transaction. The request remains pending; no wallet credit was made."
  async with engine.begin() as c:
@@ -624,9 +670,9 @@ async def deposit(b:Dep,req:Request):
   if exists is not None:
    if int(exists[1]) != uid:
     raise HTTPException(409,"This reference is already associated with another account. No wallet credit was made.")
-   return {"ok":True,"id":exists[0],"status":exists[3],"reference":ref,"message":status_message}
+   return {"ok":True,"id":exists[0],"status":exists[3],"reference":ref,"message":status_message,"retryable":bool(verified and verified.get("_retryable") is True)}
   rid=(await c.execute(text("INSERT INTO deposit_requests(telegram_id,provider,amount,reference,payment_message,parsed_message_amount) VALUES(:i,:p,:a,:r,:m,:pa) RETURNING id"),{"i":uid,"p":p,"a":entered,"r":ref,"m":message,"pa":entered})).scalar_one()
- return {"ok":True,"id":rid,"status":"pending","parsed_amount":float(entered),"reference":ref,"message":status_message}
+ return {"ok":True,"id":rid,"status":"pending","parsed_amount":float(entered),"reference":ref,"message":status_message,"retryable":bool(verified and verified.get("_retryable") is True)}
 
 class Withdrawal(BaseModel):
  provider:str
