@@ -173,7 +173,7 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
   <label class="small muted">Paste the official receipt link or complete payment SMS</label><textarea class="field sms-box" id="paymentMessage" rows="5" placeholder="Paste the official receipt link, or the full payment confirmation SMS"></textarea>
   <label class="small muted">Transaction/reference code (optional if included in the link or SMS)</label><input class="field" id="reference" placeholder="Optional if the receipt link or SMS contains a reference">
   <button class="primary" onclick="deposit()" id="submitDeposit">Verify receipt & submit deposit</button>
-  <p class="muted small" id="depositHelp">Check.et verifies supported receipts. The wallet is credited only after the transaction, amount, currency, and completed status are confirmed. eBirr cannot be auto-credited until a compatible verification API is configured.</p>
+  <p class="muted small" id="depositHelp">Check.et verifies supported receipts. Confirmed deposits are credited to your wallet automatically; no operator approval is required. eBirr cannot be auto-credited until a compatible verification API is configured.</p>
  </div>
  <div class="panel wallet-pane" id="withdrawPane">
   <h3>⬆️ Withdraw money</h3>
@@ -295,7 +295,7 @@ const strings = {
     joinok:'Cartela reserved. Game starts when the lobby timer ends.',
     claimok:'BINGO VERIFIED! Winning cells are highlighted.',
     empty:'None yet.',copied:'Referral link copied.',
-    request:'Deposit request submitted. It stays pending until a matching trusted record arrives.'
+    request:'Deposit submitted. If Check.et confirms it, your wallet is credited automatically; no operator approval is required.'
   },
   am: {
     hero:'🎉 ወደ Cartela Bingo እንኳን በደህና መጡ!',
@@ -647,7 +647,7 @@ async function deposit(){
       method:'POST',
       body:JSON.stringify({provider,amount,reference:reference||null,message,account_number:provider==='cbe_birr'?accountNumber:null})
     });
-    msg(result.message || `Deposit request #${result.id} submitted. Status: ${String(result.status||'pending').toUpperCase()}.`);
+    msg(result.message || (result.status==='verified' ? 'Payment verified and wallet credited automatically.' : `Deposit status: ${String(result.status||'pending').toUpperCase()}.`));
     document.getElementById('paymentMessage').value='';
     await refreshWallet();
   }catch(e){msg(e.message,true);}
