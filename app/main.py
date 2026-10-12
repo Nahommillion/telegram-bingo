@@ -519,11 +519,13 @@ async def _credit_verified_deposit(uid,provider,amount,reference,payment_message
    raise HTTPException(409,"This payment reference is already associated with another account. No wallet credit was made.")
   if existing and Decimal(str(existing[2])).quantize(Decimal("0.01"))!=amount:
    raise HTTPException(409,"This payment reference was submitted with a different amount. No wallet credit was made.")
-  if existing and str(existing[3]).lower()=="verified":
-   raise HTTPException(409,"This payment reference is already marked verified. No duplicate wallet credit was made.")
+  # A previous attempt may have marked the deposit request verified before the
+  # wallet ledger entry was written. If no ledger entry exists (checked above),
+  # allow this same verified request to finish crediting; the unique ledger_ref
+  # still prevents a second credit for a transaction already credited.
   if existing:
    rid=int(existing[0])
-   await c.execute(text("UPDATE deposit_requests SET status='verified',verified_at=NOW(),payment_message=:m,parsed_message_amount=:a WHERE id=:i AND status='pending'"),{"m":payment_message[:5000],"a":amount,"i":rid})
+   await c.execute(text("UPDATE deposit_requests SET status='verified',verified_at=COALESCE(verified_at,NOW()),payment_message=:m,parsed_message_amount=:a WHERE id=:i"),{"m":payment_message[:5000],"a":amount,"i":rid})
   else:
    rid=(await c.execute(text("INSERT INTO deposit_requests(telegram_id,provider,amount,reference,status,payment_message,parsed_message_amount,verified_at) VALUES(:u,:p,:a,:r,'verified',:m,:a,NOW()) RETURNING id"),{"u":uid,"p":provider,"a":amount,"r":reference,"m":payment_message[:5000]})).scalar_one()
   txid=(await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'deposit',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{"u":uid,"a":amount,"d":f"Automatically verified {provider} deposit #{rid} via Check.et","r":ledger_ref})).scalar_one_or_none()
