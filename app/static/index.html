@@ -155,7 +155,7 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
   <div class="provider-brand-strip" style="grid-template-columns:repeat(5,minmax(0,1fr))">
    <button type="button" class="provider-brand active" data-provider-brand="telebirr" onclick="chooseProvider('telebirr')"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/tele_birr/tele_birr.svg" alt="Telebirr logo"><span>telebirr</span></button>
    <button type="button" class="provider-brand" data-provider-brand="cbe_bank" onclick="chooseProvider('cbe_bank')"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/commercial_bank_of_ethiopia/commercial_bank_of_ethiopia.svg" alt="Commercial Bank of Ethiopia logo"><span>CBE Bank</span></button>
-   <button type="button" class="provider-brand" data-provider-brand="cbe_birr" onclick="chooseProvider('cbe_birr')"><span class="brand-fallback">CB</span><span>CBE Birr</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="cbe_birr" onclick="chooseProvider('cbe_birr')"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/cbe_birr_normal/cbe_birr_normal.svg" alt="CBE Birr logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="brand-fallback" style="display:none">CB</span><span>CBE Birr</span></button>
    <button type="button" class="provider-brand" data-provider-brand="ebirr" onclick="chooseProvider('ebirr')"><img src="https://visit.ebirr.com/img/logo.webp" alt="Official eBirr logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="brand-fallback" style="display:none">eB</span><span>eBirr</span></button>
    <button type="button" class="provider-brand" data-provider-brand="mpesa" onclick="chooseProvider('mpesa')"><img src="https://play-lh.googleusercontent.com/aNTX4YdITm2ZttFNiuJQ8X-17-656cyOFeTfchNwu9MmhZbBv_Fl1pPUFzv6s5xOMszlrHb3LH6j4JlUrgOiVJk%3Dw240-h480" alt="M-PESA Safaricom Ethiopia official app logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="brand-fallback" style="display:none">M</span><span>M-Pesa</span></button>
   </div>
@@ -255,7 +255,7 @@ if (tg) {
 }
 
 let L = 'en';
-let mpesaReceivers = [];
+let mpesaReceivers = [];let cbeBirrReceivers=[];let depositBusy=false;
 let me = null;
 let G = null;
 let winCells = [];
@@ -342,11 +342,19 @@ const strings = {
 
 function t(k){return (strings[L]&&strings[L][k])||strings.en[k]||k}
 
+let noticeTimer=null;
 function msg(s,bad=false){
   const n=document.getElementById('notice');
   n.textContent=s;
   n.className='notice'+(bad?' err':'');
-  setTimeout(()=>n.classList.add('hidden'),5000);
+  if(noticeTimer)clearTimeout(noticeTimer);
+  noticeTimer=setTimeout(()=>n.classList.add('hidden'),5000);
+}
+function depositStatus(s,bad=false){
+  const n=document.getElementById('notice');
+  if(noticeTimer)clearTimeout(noticeTimer);
+  n.textContent=s;
+  n.className='notice'+(bad?' err':'');
 }
 
 function go(id){
@@ -466,7 +474,8 @@ async function boot(){
     try{
       const paymentMethods=await fetch('/api/public-payment-methods').then(r=>r.ok?r.json():({}));
       mpesaReceivers=Array.isArray(paymentMethods.mpesa_receivers)?paymentMethods.mpesa_receivers:[];
-    }catch(e){mpesaReceivers=[];}
+      cbeBirrReceivers=Array.isArray(paymentMethods.cbe_birr_receivers)?paymentMethods.cbe_birr_receivers:[];
+    }catch(e){mpesaReceivers=[];cbeBirrReceivers=[];}
     showDepositDetails();updateWithdrawDestination();
     await refreshLeaders();
     applyLang();
@@ -634,23 +643,43 @@ async function refreshWallet(){
 }
 
 async function deposit(){
-  try{
-    const amount=Number(document.getElementById('amount').value);
-    const reference=document.getElementById('reference').value.trim();
-    const message=document.getElementById('paymentMessage').value.trim();
-    const provider=document.getElementById('provider').value;
-    const accountNumber=document.getElementById('payerPhone')?.value.trim()||'';
-    if(!amount||amount<=0)throw Error('Enter the exact amount you deposited.');
-    if(message.length<8)throw Error('Paste the official receipt link or complete payment confirmation SMS first.');
-    if(provider==='cbe_birr'&&accountNumber.replace(/\D/g,'').length<9)throw Error('Enter the phone number used to make the CBE Birr payment.');
-    const result=await api('/api/deposits',{
-      method:'POST',
-      body:JSON.stringify({provider,amount,reference:reference||null,message,account_number:provider==='cbe_birr'?accountNumber:null})
-    });
-    msg(result.message || (result.status==='verified' ? 'Payment verified and wallet credited automatically.' : `Deposit status: ${String(result.status||'pending').toUpperCase()}.`));
+ if(depositBusy)return;
+ const button=document.getElementById('submitDeposit');
+ const originalLabel=button.textContent;
+ try{
+  const amount=Number(document.getElementById('amount').value);
+  const reference=document.getElementById('reference').value.trim();
+  const message=document.getElementById('paymentMessage').value.trim();
+  const provider=document.getElementById('provider').value;
+  const accountNumber=document.getElementById('payerPhone')?.value.trim()||'';
+  if(!amount||amount<=0)throw Error('Enter the exact amount you deposited.');
+  if(message.length<8)throw Error('Paste the official receipt link or complete payment confirmation SMS first.');
+  if(provider==='cbe_birr'&&accountNumber.replace(/\D/g,'').length<9)throw Error('Enter the phone number used to make the CBE Birr payment.');
+  const payload={provider,amount,reference:reference||null,message,account_number:provider==='cbe_birr'?accountNumber:null};
+  depositBusy=true;button.disabled=true;
+  let result=null;
+  const maxChecks=20; // Recheck transient bank outages for up to about four minutes.
+  for(let attempt=0;attempt<maxChecks;attempt++){
+   button.textContent=attempt===0?'Checking payment…':`Waiting for bank verification (${attempt+1}/${maxChecks})…`;
+   result=await api('/api/deposits',{method:'POST',body:JSON.stringify(payload)});
+   if(result.status==='verified'){
+    msg(result.message||'Payment verified and wallet credited automatically.');
     document.getElementById('paymentMessage').value='';
+    document.getElementById('reference').value='';
     await refreshWallet();
-  }catch(e){msg(e.message,true);}
+    return;
+   }
+   await refreshWallet();
+   if(!result.retryable) {
+    msg(result.message||'Payment is not verified yet. No wallet credit has been made.',true);
+    return;
+   }
+   depositStatus((result.message||'Bank verification is temporarily unavailable.')+' Checking again automatically; keep this screen open.');
+   await new Promise(resolve=>setTimeout(resolve,12000));
+  }
+  depositStatus('Check.et or the bank is still unavailable. Your deposit remains pending and has not been credited. Keep this screen open and press Verify receipt & submit deposit to retry.',true);
+ }catch(e){msg(e.message,true);}
+ finally{depositBusy=false;button.disabled=false;button.textContent=originalLabel;}
 }
 
 function walletTab(tab){
@@ -679,7 +708,8 @@ function showDepositDetails(){
   return;
  }
  if(p==='cbe_birr'){
-  host.innerHTML='<div class="notice">CBE Birr receipt verification requires the payer phone number. Enter it below. Confirm the correct receiving account before sending money.</div>';
+  const receivers=cbeBirrReceivers.length?cbeBirrReceivers:depositRecipients.filter(x=>x.provider==='Phone recipient').map(x=>({name:x.title,number:x.detail}));
+  host.innerHTML='<div class="notice">Send your CBE Birr deposit to one of these phone numbers, reusing the Telebirr receiving numbers as requested. Enter your own payer phone number below so Check.et can verify the receipt.</div>'+receivers.map(x=>`<div class="provider-row"><div class="provider-logo"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/cbe_birr_normal/cbe_birr_normal.svg" alt="CBE Birr logo" onerror="this.style.display='none';this.parentElement.textContent='CB'"></div><div class="details"><b>${esc(x.name)}</b><div class="muted small">CBE Birr receiving phone: ${esc(x.number)}</div></div><button class="copy-small" onclick="copyValue('${esc(x.number)}')">Copy</button></div>`).join('');
   return;
  }
  if(p==='ebirr'){
