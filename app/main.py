@@ -529,7 +529,10 @@ async def _credit_verified_deposit(uid,provider,amount,reference,payment_message
   txid=(await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'deposit',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{"u":uid,"a":amount,"d":f"Automatically verified {provider} deposit #{rid} via Check.et","r":ledger_ref})).scalar_one_or_none()
   if txid is None:
    raise HTTPException(409,"This payment reference was already credited or is being processed. No duplicate credit was made.")
-  await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":amount,"u":uid})
+  await c.execute(text("INSERT INTO bingo_wallets(telegram_id,balance) VALUES(:u,0) ON CONFLICT(telegram_id) DO NOTHING"),{"u":uid})
+  updated=await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":amount,"u":uid})
+  if updated.rowcount != 1:
+   raise HTTPException(500,"Deposit was verified but wallet credit failed. Please retry; duplicate protection remains active.")
  return True
 
 async def _verify_deposit_receipt(provider, reference, message, account_number=None):
@@ -590,7 +593,7 @@ async def deposit(b:Dep,req:Request):
  data=data or {}
  receipt=data.get("receipt") if isinstance(data.get("receipt"),dict) else {}
  combined={**data,**receipt}
- if verified and verified.get("success") is True and verified.get("exists") is True and verified.get("duplicate") is not True:
+ if verified and verified.get("success") is True and verified.get("exists") is True:
   verified_amount=_verification_amount(data)
   currency=str(_field(receipt,"currency","currencyCode","currency_code") or _field(data,"currency","currencyCode","currency_code") or "").upper()
   receipt_status=str(_field(receipt,"status","payment_status","state") or "").strip().lower()
@@ -610,8 +613,6 @@ async def deposit(b:Dep,req:Request):
    if not credited:
     raise HTTPException(409,"This transaction reference was already processed. No duplicate credit was made.")
    return {"ok":True,"status":"verified","reference":ref,"parsed_amount":float(verified_amount),"message":"Check.et verified the payment and amount. Your Cartela Bingo wallet has been credited."}
- elif verified and verified.get("duplicate") is True:
-  status_message="Check.et reports that this receipt was already verified before. No wallet credit was made."
  elif not verified:
   status_message=unsupported_reason or "Check.et could not be reached or returned no verification. The request remains pending; no wallet credit was made."
  else:
