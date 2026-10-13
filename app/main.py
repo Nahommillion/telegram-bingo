@@ -120,27 +120,26 @@ async def contact(up,ctx):
 async def start(up,ctx):
  logger.info("Received /start update")
  u=up.effective_user; await reg(u.id,u.username,u.first_name,"am" if (u.language_code or "").startswith("am") else "en")
+
  if ctx.args and ctx.args[0].startswith("ref_"):
   try:
-   r=int(ctx.args[0][4:])
-   if r!=u.id:
-    try:
-     
-async with engine.begin() as c:
-    await c.execute(
-        text("""
-            INSERT INTO bingo_referrals (
-                referrer_telegram_id,
-                referred_telegram_id
-            )
-            VALUES (:r, :u)
-            ON CONFLICT (referred_telegram_id) DO NOTHING
-        """),
-        {"r": r, "u": u.id}
-    )
-    except Exception:
-     # Referral tracking must not prevent a user from starting the bot.
-     logger.exception("Referral tracking failed; continuing /start")
+   r = int(ctx.args[0][4:])
+   if r != u.id:
+    async with engine.begin() as c:
+     await c.execute(
+      text("""
+       INSERT INTO bingo_referrals (
+        referrer_telegram_id,
+        referred_telegram_id
+       )
+       VALUES (:r, :u)
+       ON CONFLICT (referred_telegram_id) DO NOTHING
+      """),
+      {"r": r, "u": u.id}
+     )
+  except Exception:
+   logger.exception("Failed to record referral")
+
   except ValueError:pass
  async with engine.connect() as c:
   phone=(await c.execute(text("SELECT phone_number FROM bingo_users WHERE telegram_id=:i"),{"i":u.id})).scalar_one_or_none()
