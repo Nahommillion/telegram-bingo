@@ -125,7 +125,19 @@ async def start(up,ctx):
    r=int(ctx.args[0][4:])
    if r!=u.id:
     try:
-     async with engine.begin() as c:await c.execute(text("INSERT INTO bingo_referrals(referrer_telegram_id,referred_telegram_id) VALUES(:r,:u) ON CONFLICT(referred_telegram_id) DO NOTHING"),{"r":r,"u":u.id})
+     
+async with engine.begin() as c:
+    await c.execute(
+        text("""
+            INSERT INTO bingo_referrals (
+                referrer_telegram_id,
+                referred_telegram_id
+            )
+            VALUES (:r, :u)
+            ON CONFLICT (referred_telegram_id) DO NOTHING
+        """),
+        {"r": r, "u": u.id}
+    )
     except Exception:
      # Referral tracking must not prevent a user from starting the bot.
      logger.exception("Referral tracking failed; continuing /start")
