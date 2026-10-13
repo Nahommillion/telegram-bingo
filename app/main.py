@@ -435,12 +435,20 @@ async def _checket_verify(payload):
     if not retry:
      result.pop("_retryable",None)
      return result
+  
   except urllib.error.HTTPError as exc:
-   retry=(exc.code == 429 or 500 <= exc.code <= 599)
-   last_retryable=retry
-   logger.warning("Check.et verification returned HTTP %s (attempt %s/3)",exc.code,attempt+1)
+   retry = (exc.code == 429 or 500 <= exc.code <= 599)
+   try:
+    error_body = exc.read(1000).decode("utf-8", "replace")
+   except Exception:
+    error_body = "(response body unavailable)"
+   logger.warning(
+    "Check.et HTTP %s (attempt %s/3); response: %s",
+    exc.code, attempt + 1, error_body
+   )
    if not retry:
     return None
+
   except Exception as exc:
    retry=True
    last_retryable=True
