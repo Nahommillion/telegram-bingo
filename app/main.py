@@ -53,7 +53,7 @@ async def dbinit():
  "CREATE TABLE IF NOT EXISTS bingo_games(id BIGSERIAL PRIMARY KEY,status TEXT,created_at TIMESTAMPTZ DEFAULT NOW(),started_at TIMESTAMPTZ,finished_at TIMESTAMPTZ,winner_telegram_id BIGINT,called_numbers JSONB DEFAULT '[]'::jsonb)",
  "CREATE TABLE IF NOT EXISTS bingo_game_players(game_id BIGINT,telegram_id BIGINT,cartela_number INT,cartela JSONB,stake NUMERIC(14,2) DEFAULT 0,PRIMARY KEY(game_id,telegram_id),UNIQUE(game_id,cartela_number))",
  "ALTER TABLE bingo_games ADD COLUMN IF NOT EXISTS lobby_started_at TIMESTAMPTZ",
- "CREATE TABLE IF NOT EXISTS bingo_game_entries(game_id BIGINT NOT NULL,telegram_id BIGINT NOT NULL,cartela_number INT NOT NULL,cartela JSONB NOT NULL,stake NUMERIC(14,2) NOT NULL DEFAULT 30,created_at TIMESTAMPTZ DEFAULT NOW(),PRIMARY KEY(game_id,cartela_number),UNIQUE(game_id,telegram_id,cartela_number))",
+ "CREATE TABLE IF NOT EXISTS bingo_game_entries(game_id BIGINT NOT NULL,telegram_id BIGINT NOT NULL,cartela_number INT NOT NULL,cartela JSONB NOT NULL,stake NUMERIC(14,2) NOT NULL DEFAULT 10,created_at TIMESTAMPTZ DEFAULT NOW(),PRIMARY KEY(game_id,cartela_number),UNIQUE(game_id,telegram_id,cartela_number))",
  "CREATE TABLE IF NOT EXISTS bingo_platform_wallet(id INT PRIMARY KEY DEFAULT 1 CHECK(id=1),balance NUMERIC(14,2) NOT NULL DEFAULT 0,updated_at TIMESTAMPTZ DEFAULT NOW())",
  "INSERT INTO bingo_platform_wallet(id,balance) VALUES(1,0) ON CONFLICT(id) DO NOTHING",
  "INSERT INTO bingo_game_entries(game_id,telegram_id,cartela_number,cartela,stake) SELECT game_id,telegram_id,cartela_number,cartela,stake FROM bingo_game_players WHERE TRUE ON CONFLICT(game_id,cartela_number) DO NOTHING"
