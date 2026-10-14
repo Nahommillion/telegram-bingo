@@ -74,10 +74,35 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
 .pill{font-size:11px;border-radius:20px;padding:5px 8px;background:#1a4d3b;color:#72f2ba}
 .wide{margin-top:10px}
 .center{text-align:center}
+
+/* ADDITIVE GRAPHICS UPGRADE — visual-only; existing app logic is unchanged */
+body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.34;background:radial-gradient(circle at 8% 28%,#0b9d5b22 0 8%,transparent 22%),radial-gradient(circle at 92% 36%,#f8c9471b 0 7%,transparent 22%),radial-gradient(circle at 52% 100%,#ed33461a 0 8%,transparent 28%)}
+.float-bg span:nth-child(7){left:24%;top:8%;animation-delay:-3s;color:#ffd447}
+.float-bg span:nth-child(8){left:73%;top:28%;animation-delay:-7s;color:#12c879}
+.float-bg span:nth-child(9){left:31%;top:62%;animation-delay:-11s;color:#ef4055}
+.float-bg span:nth-child(10){left:56%;top:15%;animation-delay:-5s;color:#ffd447}
+.float-bg span:nth-child(11){left:7%;top:48%;animation-delay:-9s;color:#12c879}
+.float-bg span:nth-child(12){left:88%;top:78%;animation-delay:-13s;color:#ef4055}
+.float-bg span:nth-child(7),.float-bg span:nth-child(8),.float-bg span:nth-child(9),.float-bg span:nth-child(10),.float-bg span:nth-child(11),.float-bg span:nth-child(12){font-size:20px;opacity:.9;text-shadow:0 0 14px currentColor}
+.hero{isolation:isolate}
+.hero::after{content:"✦  ✧  ✦";position:absolute;right:12px;top:12px;color:#ffd447;letter-spacing:8px;font-size:12px;opacity:.7;pointer-events:none;animation:twinkle 3.4s ease-in-out infinite}
+.stat,.panel,.tile{position:relative;overflow:hidden}
+.stat::after,.panel::after,.tile::after{content:"";position:absolute;top:0;left:-120%;width:55%;height:1px;background:linear-gradient(90deg,transparent,#ffd447aa,transparent);pointer-events:none;animation:gold-sweep 8s ease-in-out infinite}
+.tile:nth-child(2)::after{animation-delay:1.5s}.tile:nth-child(3)::after{animation-delay:3s}.tile:nth-child(4)::after{animation-delay:4.5s}
+.primary{position:relative;overflow:hidden;transition:transform .18s ease,box-shadow .18s ease}
+.primary:not(:disabled):active{transform:scale(.985)}
+.primary:not(:disabled){animation:button-glow 3.2s ease-in-out infinite}
+.mark{position:relative}
+.mark::after{content:"";position:absolute;inset:3px;border:1px solid #ffd44799;border-radius:12px;pointer-events:none}
+@keyframes twinkle{0%,100%{opacity:.35;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}
+@keyframes gold-sweep{0%,65%,100%{left:-120%;opacity:0}72%{opacity:1}90%{left:160%;opacity:0}}
+@keyframes button-glow{0%,100%{box-shadow:0 7px 20px #00bf7040}50%{box-shadow:0 7px 24px #00bf7066,0 0 0 1px #ffd44733}}
+@media(prefers-reduced-motion:reduce){.float-bg span,.hero::after,.stat::after,.panel::after,.tile::after,.primary:not(:disabled){animation:none!important}*{scroll-behavior:auto!important}}
+
 </style>
 </head>
 <body>
-<div class="float-bg" aria-hidden="true"><span>🎱</span><span>✦</span><span>●</span><span>🎱</span><span>✦</span><span>●</span></div>
+<div class="float-bg" aria-hidden="true"><span>🎱</span><span>✦</span><span>●</span><span>🎱</span><span>✦</span><span>●</span><span>🎱</span><span>✦</span><span>●</span><span>🎱</span><span>✧</span><span>●</span></div>
 <div class="flag"></div>
 <div class="wrap">
 <header class="top">
