@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -122,3 +123,708 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
 <div class="title"><h3 id="chooseCard">Choose Your Cartela (1–200)</h3></div>
 <p class="muted small">Choose an available number. Green = available. Black = already taken. Press Start Game to reserve your selected cartela and join the 30-second countdown.</p>
 <input id="cartelaSearch" class="field" type="number" min="1" max="200" placeholder="Find cartela number (1–200)" oninput="renderChoices()">
+<div class="selection-summary"><span>Selected cartela</span><strong id="selectedCartelaLabel">None</strong></div>
+<label class="small muted" id="stakeLabel">Bet per cartela (minimum 10 Birr)</label>
+<input id="stake" class="field" type="number" min="10" max="1000" step="1" value="10" oninput="updateSelectionSummary()">
+<div class="muted small" id="betSummary">Select cartelas to calculate your total bet.</div>
+<button class="primary" id="startGameBtn" onclick="startSelectedGame()" disabled>🎮 Start Game (30s countdown)</button>
+<div class="title"><span class="muted small">Available cartelas</span><span class="muted small" id="availableCount">200 available</span></div>
+<div class="cardgrid" id="choices"></div>
+</div>
+<div id="playing" class="hidden">
+<div class="title"><h3 id="yourCard">Your Cartela</h3><span class="pill" id="cardNum"></span></div>
+<div class="panel">
+<div id="myCards"></div>
+<div class="chips" id="recent"></div>
+<div id="claimMsg" class="notice hidden"></div>
+</div>
+</div>
+<div class="title"><h3 id="calledTitle">📣 Called Numbers</h3></div>
+<div class="panel"><div class="chips" id="allCalled"></div></div>
+</section>
+
+<section class="screen" id="wallet">
+ <div class="title"><h3 id="walletTitle">💳 Wallet</h3></div>
+ <div class="panel"><div class="muted small" id="currentBalLabel">AVAILABLE BALANCE</div><h2 id="walletBal">0.00 Birr</h2><div class="notice" id="autoNote">Deposits are credited automatically only after Check.et confirms the payment. Withdrawals may still require processing. Never send money to an unverified recipient.</div></div>
+ <div class="wallet-actions">
+  <button class="wallet-tab active" data-wallet-tab="deposit" onclick="walletTab('deposit')">➕ Deposit</button>
+  <button class="wallet-tab" data-wallet-tab="withdraw" onclick="walletTab('withdraw')">⬆️ Withdraw</button>
+  <button class="wallet-tab" data-wallet-tab="transfer" onclick="walletTab('transfer')">↔️ Transfer</button>
+ </div>
+ <div class="panel wallet-pane active" id="depositPane">
+  <h3 id="depositReq">➕ Deposit</h3>
+  <div class="provider-brand-strip" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+   <button type="button" class="provider-brand active" data-provider-brand="telebirr" onclick="chooseProvider('telebirr')"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/tele_birr/tele_birr.svg" alt="Telebirr logo"><span>telebirr</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="cbe_bank" onclick="chooseProvider('cbe_bank')"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/commercial_bank_of_ethiopia/commercial_bank_of_ethiopia.svg" alt="Commercial Bank of Ethiopia logo"><span>CBE Bank</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="cbe_birr" onclick="chooseProvider('cbe_birr')"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/cbe_birr_normal/cbe_birr_normal.svg" alt="CBE Birr logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="brand-fallback" style="display:none">CB</span><span>CBE Birr</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="ebirr" onclick="chooseProvider('ebirr')"><img src="https://visit.ebirr.com/img/logo.webp" alt="Official eBirr logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="brand-fallback" style="display:none">eB</span><span>eBirr</span></button>
+   <button type="button" class="provider-brand" data-provider-brand="mpesa" onclick="chooseProvider('mpesa')"><img src="https://play-lh.googleusercontent.com/aNTX4YdITm2ZttFNiuJQ8X-17-656cyOFeTfchNwu9MmhZbBv_Fl1pPUFzv6s5xOMszlrHb3LH6j4JlUrgOiVJk%3Dw240-h480" alt="M-PESA Safaricom Ethiopia official app logo" onerror="this.style.display='none';this.nextElementSibling.style.display='grid'"><span class="brand-fallback" style="display:none">M</span><span>M-Pesa</span></button>
+  </div>
+  <label class="small muted">Choose payment method</label>
+  <select class="field" id="provider" onchange="showDepositDetails()">
+   <option value="telebirr">Telebirr</option><option value="cbe_bank">CBE Bank</option><option value="cbe_birr">CBE Birr</option><option value="ebirr">eBirr</option><option value="mpesa">M-Pesa</option>
+  </select>
+  <div id="depositDetails" class="provider-list"></div>
+  <div id="payerPhoneWrap" class="hidden">
+   <label class="small muted">CBE Birr payer phone number</label>
+   <input class="field" id="payerPhone" type="tel" placeholder="Phone number used to send the payment">
+   <p class="muted small">Enter the phone number that made this CBE Birr payment. Check.et requires it to verify CBE Birr receipts.</p>
+  </div>
+  <label class="small muted">Amount you deposited (Birr)</label><input class="field" id="amount" type="number" min="1" step="0.01" placeholder="Enter the exact amount, e.g. 100">
+  <label class="small muted">Paste the official receipt link or complete payment SMS</label><textarea class="field sms-box" id="paymentMessage" rows="5" placeholder="Paste the official receipt link, or the full payment confirmation SMS"></textarea>
+  <label class="small muted">Transaction/reference code (optional if included in the link or SMS)</label><input class="field" id="reference" placeholder="Optional if the receipt link or SMS contains a reference">
+  <button class="primary" onclick="deposit()" id="submitDeposit">Verify receipt & submit deposit</button>
+  <p class="muted small" id="depositHelp">Check.et verifies supported receipts. Confirmed deposits are credited to your wallet automatically; no operator approval is required. eBirr cannot be auto-credited until a compatible verification API is configured.</p>
+ </div>
+ <div class="panel wallet-pane" id="withdrawPane">
+  <h3>⬆️ Withdraw money</h3>
+  <label class="small muted">Amount to withdraw (Birr)</label><input class="field" id="withdrawAmount" type="number" min="1" placeholder="100">
+  <label class="small muted">Choose withdrawal method</label>
+  <select class="field" id="withdrawProvider" onchange="updateWithdrawDestination()"><option value="telebirr">Telebirr</option><option value="cbe_bank">CBE Bank</option><option value="ebirr">eBirr</option><option value="mpesa">M-Pesa</option></select>
+  <label class="small muted" id="withdrawDestinationLabel">Phone number</label>
+  <input class="field" id="withdrawDestination" placeholder="Enter phone number">
+  <button class="primary" onclick="withdraw()">Submit withdrawal request</button>
+  <p class="muted small">Requests stay pending while the operator processes them. The amount is reserved from your available balance.</p>
+ </div>
+ <div class="panel wallet-pane" id="transferPane">
+  <h3>↔️ Transfer to a player</h3>
+  <label class="small muted">Find player using</label>
+  <select class="field" id="transferMethod"><option value="phone">📱 Registered phone number</option><option value="username">Telegram username</option></select>
+  <label class="small muted" id="transferRecipientLabel">Player phone number</label>
+  <input class="field" id="transferRecipient" placeholder="Enter registered phone number">
+  <label class="small muted">Amount to transfer (Birr)</label><input class="field" id="transferAmount" type="number" min="1" placeholder="50">
+  <button class="primary" onclick="transfer()">Review and transfer</button>
+  <p class="muted small">Check the recipient and amount carefully. Transfers to other registered players are immediate and cannot be automatically reversed.</p>
+ </div>
+ <div class="title"><h3>Deposit Requests</h3></div><div class="panel" id="deposits"></div>
+ <div class="title"><h3>Withdrawal Requests</h3></div><div class="panel" id="withdrawals"></div>
+ <div class="title"><h3 id="txTitle">📜 Transaction History</h3></div><div class="panel" id="transactions"></div>
+ </section>
+
+<section class="screen" id="leaderboard">
+<div class="title"><h3 id="leaderTitle">🏆 Leaderboard</h3></div>
+<div class="panel" id="leaders">Loading…</div>
+<div class="panel" style="margin-top:12px"><h3 id="inviteTitle">👥 Invite Friends</h3><p class="muted small" id="inviteText">Friends must open your link and press Start to register.</p><input class="field" id="refLink" readonly><button class="primary" onclick="copyLink()" id="copyBtn">Copy Referral Link</button></div>
+</section>
+
+<section class="screen" id="profile">
+<div class="title"><h3 id="profileTitle">👤 Player Profile</h3></div>
+<div class="panel"><div style="font-size:44px">🧑🏽‍🎮</div><h2 id="name">Player</h2><div class="muted" id="handle">Telegram player</div><div class="stat" style="margin-top:12px"><span id="profileBalLabel">AVAILABLE BALANCE</span><strong id="profileBal">0.00 Birr</strong></div><div class="notice" id="profileNote">Your Telegram identity is verified when opened from the bot.</div></div>
+<div class="title"><h3 id="settings">⚙️ Settings</h3></div>
+<div class="panel"><div class="row"><span>🌐 Language / ቋንቋ</span><button class="secondary" onclick="toggleLang()">English / አማርኛ</button></div><div class="row"><span>🆘 Support</span><span class="muted small">Contact admin</span></div><div class="row"><span>👥 Referrals</span><span class="pill" id="refCount">0</span></div></div>
+</section>
+</div>
+
+<nav class="bottom">
+<button class="nav active" data-tab="home" onclick="go('home')"><span>🏠</span><b id="navHome">Home</b></button>
+<button class="nav" data-tab="game" onclick="go('game')"><span>🎱</span><b id="navGame">Game</b></button>
+<button class="nav" data-tab="wallet" onclick="go('wallet')"><span>💳</span><b id="navWallet">Wallet</b></button>
+<button class="nav" data-tab="leaderboard" onclick="go('leaderboard')"><span>🏆</span><b id="navLeaders">Leaders</b></button>
+<button class="nav" data-tab="profile" onclick="go('profile')"><span>👤</span><b id="navProfile">Profile</b></button>
+</nav>
+
+<script>
+/*
+ * Telegram Mini App initialization.
+ * Read WebApp and initData dynamically instead of relying on a
+ * potentially stale value captured at page startup.
+ */
+function telegramApp() {
+  return window.Telegram && window.Telegram.WebApp
+    ? window.Telegram.WebApp
+    : null;
+}
+
+function init() {
+  const webApp = telegramApp();
+  return webApp && typeof webApp.initData === 'string'
+    ? webApp.initData
+    : '';
+}
+
+const tg = telegramApp();
+
+if (tg) {
+  tg.ready();
+  tg.expand();
+  try {
+    tg.setHeaderColor('#071525');
+    tg.setBackgroundColor('#071525');
+  } catch (e) {
+    console.warn('Telegram appearance settings unavailable:', e);
+  }
+}
+
+let L = 'en';
+let mpesaReceivers = [];let cbeBirrReceivers=[];let depositBusy=false;
+let me = null;
+let G = null;
+let winCells = [];
+let busy = false;
+let interval = null;
+const selectedCartelas = new Set();
+const manualMarksByCard = {};
+
+const strings = {
+  en: {
+    hero:'🎉 Welcome to Cartela Bingo!',
+    tagline:'Choose a cartela. Follow the numbers. Claim your win!',
+    balLabel:'YOUR BALANCE',playersLabel:'PLAYERS',profileBalLabel:'AVAILABLE BALANCE',
+    play:'🎮 Play Bingo Now',quick:'✨ Quick Access',
+    depositTile:'Deposit Funds',walletTile:'My Wallet',
+    leaderTile:'Leaderboard',profileTile:'My Profile',
+    liveTitle:'🎱 Live Game',lobbyHint:'Choose a cartela to join the next game.',
+    openLobby:'Open Game Lobby →',gameTitle:'🎮 Game Lobby',
+    chooseDesc:'Choose your cartela and join the next game.',
+    lastLabel:'Last number called',chooseCard:'Choose Your Cartela',
+    stakeLabel:'Bet per cartela (minimum 10 Birr)',yourCard:'Your Cartela',
+    calledTitle:'📣 Called Numbers',bingo:'🏆 BINGO!',
+    walletTitle:'💳 Wallet & Deposits',currentBalLabel:'CURRENT BALANCE',
+    autoNote:'Deposits are credited automatically only after Check.et confirms the payment. Withdrawals may still require processing. Never send money to an unverified recipient.',
+    depositReq:'➕ Create Deposit Request',submitDeposit:'Verify Receipt & Submit',
+    depositHelp:'Check.et verifies supported receipt links or payment text. Wallet credit requires a confirmed transaction, exact amount, ETB currency, and completed payment status. eBirr needs a separate supported verification integration.',
+    txTitle:'📜 Transaction History',leaderTitle:'🏆 Leaderboard',
+    inviteTitle:'👥 Invite Friends',
+    inviteText:'Friends must open your link and press Start to register.',
+    copyBtn:'Copy Referral Link',profileTitle:'👤 Player Profile',
+    profileNote:'Your Telegram identity is verified when opened from the bot.',
+    settings:'⚙️ Settings',navHome:'Home',navGame:'Game',
+    navWallet:'Wallet',navLeaders:'Leaders',navProfile:'Profile',
+    available:'Available',taken:'Taken',select:'Select',joined:'Selected',
+    waiting:'WAITING',running:'LIVE',finished:'FINISHED',
+    need:'Telegram launch data is missing. Close the Mini App and reopen it using Play Now in your bot chat.',
+    joinok:'Cartela reserved. Game starts when the lobby timer ends.',
+    claimok:'BINGO VERIFIED! Winning cells are highlighted.',
+    empty:'None yet.',copied:'Referral link copied.',
+    request:'Deposit submitted. If Check.et confirms it, your wallet is credited automatically; no operator approval is required.'
+  },
+  am: {
+    hero:'🎉 ወደ Cartela Bingo እንኳን በደህና መጡ!',
+    tagline:'ካርቴላ ይምረጡ። ቁጥሮችን ይከታተሉ። ያሸንፉ!',
+    balLabel:'ቀሪ ሂሳብዎ',playersLabel:'ተጫዋቾች',profileBalLabel:'ያለው ቀሪ ሂሳብ',
+    play:'🎮 ቢንጎ ይጫወቱ',quick:'✨ ፈጣን አማራጮች',
+    depositTile:'ገንዘብ ያስገቡ',walletTile:'የእኔ ሂሳብ',
+    leaderTile:'ደረጃ ሰንጠረዥ',profileTile:'የእኔ መገለጫ',
+    liveTitle:'🎱 የቀጥታ ጨዋታ',
+    lobbyHint:'ቀጣዩን ጨዋታ ለመቀላቀል ካርቴላ ይምረጡ።',
+    openLobby:'የጨዋታ ክፍል ይክፈቱ →',
+    gameTitle:'🎮 የጨዋታ ክፍል',
+    chooseDesc:'ካርቴላዎን ይምረጡና ይቀላቀሉ።',
+    lastLabel:'የመጨረሻ የተጠራ ቁጥር',
+    chooseCard:'ካርቴላዎን ይምረጡ',
+    stakeLabel:'ለእያንዳንዱ ካርቴላ ውርርድ (ቢያንስ 10 ብር)',
+    yourCard:'የእርስዎ ካርቴላ',
+    calledTitle:'📣 የተጠሩ ቁጥሮች',bingo:'🏆 ቢንጎ!',
+    walletTitle:'💳 ሂሳብና ተቀማጭ',
+    currentBalLabel:'የአሁኑ ሂሳብ',
+    autoNote:'የክፍያ ደረሰኝ ሊንክ ወይም SMS ከታች ያስገቡ። Check.et ያረጋግጣል፤ መጠኑና ተቀባዩ ከተረጋገጡ ብቻ ሂሳብ ይጨምራል።',
+    depositReq:'➕ የተቀማጭ ጥያቄ ይፍጠሩ',
+    submitDeposit:'ደረሰኝ አረጋግጥና ላክ',
+    depositHelp:'Check.et የክፍያ ሊንክ ወይም ጽሑፍ ያረጋግጣል። የተረጋገጠው መጠንና ተቀባይ ሂሳብ ከተዛመዱ ብቻ ቀሪ ሂሳብ ይጨምራል። eBirr በአሁኑ ጊዜ በAPI አይደገፍም።',
+    txTitle:'📜 የግብይት ታሪክ',
+    leaderTitle:'🏆 ደረጃ ሰንጠረዥ',
+    inviteTitle:'👥 ጓደኞችን ይጋብዙ',
+    inviteText:'ጓደኞች ሊንኩን ከፍተው Start መጫን አለባቸው።',
+    copyBtn:'የግብዣ ሊንክ ቅዳ',
+    profileTitle:'👤 የተጫዋች መገለጫ',
+    profileNote:'ከቦቱ ሲከፈት የTelegram መለያዎ ይረጋገጣል።',
+    settings:'⚙️ ቅንብሮች',navHome:'ቤት',navGame:'ጨዋታ',
+    navWallet:'ሂሳብ',navLeaders:'ደረጃ',navProfile:'መገለጫ',
+    available:'ክፍት',taken:'ተይዟል',select:'ይምረጡ',
+    joined:'ተመርጧል',waiting:'በመጠባበቅ',
+    running:'በቀጥታ',finished:'ተጠናቋል',
+    need:'ከTelegram ቦትዎ ይክፈቱ።',
+    joinok:'ካርቴላ ተይዟል። ጊዜው ሲያበቃ ጨዋታው ይጀምራል።',
+    claimok:'ቢንጎ ተረጋግጧል! አሸናፊ ህዋሶች ተደምቀዋል።',
+    empty:'ገና የለም።',copied:'ሊንኩ ተቀድቷል።',
+    request:'የተቀማጭ ጥያቄ ተልኳል። የተፈቀደ መዝገብ እስኪዛመድ ይጠብቃል።'
+  }
+};
+
+function t(k){return (strings[L]&&strings[L][k])||strings.en[k]||k}
+
+let noticeTimer=null;
+function msg(s,bad=false){
+  const n=document.getElementById('notice');
+  n.textContent=s;
+  n.className='notice'+(bad?' err':'');
+  if(noticeTimer)clearTimeout(noticeTimer);
+  noticeTimer=setTimeout(()=>n.classList.add('hidden'),5000);
+}
+function depositStatus(s,bad=false){
+  const n=document.getElementById('notice');
+  if(noticeTimer)clearTimeout(noticeTimer);
+  n.textContent=s;
+  n.className='notice'+(bad?' err':'');
+}
+
+function go(id){
+  document.querySelectorAll('.screen').forEach(x=>x.classList.toggle('active',x.id===id));
+  document.querySelectorAll('.nav').forEach(x=>x.classList.toggle('active',x.dataset.tab===id));
+  if(id==='game')refreshGame().catch(e=>msg(e.message,true));
+  if(id==='wallet')refreshWallet();
+  if(id==='leaderboard')refreshLeaders();
+  if(id==='profile')refreshMe();
+  window.scrollTo(0,0);
+}
+
+/*
+ * All API requests use the latest Telegram initData.
+ * Do not send Telegram user information as a substitute for initData:
+ * the backend must verify Telegram's signature.
+ */
+async function api(url,opt={}){
+  const webApp=telegramApp();
+  const initData=webApp&&typeof webApp.initData==='string'
+    ? webApp.initData
+    : '';
+
+  if(!initData){
+    throw new Error(
+      'Telegram launch data is missing. Close the Mini App and reopen it using the Play Now button inside your bot chat.'
+    );
+  }
+
+  const headers=new Headers(opt.headers||{});
+  headers.set('Content-Type','application/json');
+  headers.set('X-Telegram-Init-Data',initData);
+
+  const response=await fetch(url,{...opt,headers});
+  const contentType=response.headers.get('content-type')||'';
+  let data;
+
+  if(contentType.includes('application/json')){
+    data=await response.json();
+  }else{
+    const responseText=await response.text();
+    data={detail:responseText||'The server returned a non-JSON response.'};
+  }
+
+  if(!response.ok){
+    throw new Error(data.detail||data.message||`Request failed (${response.status})`);
+  }
+  return data;
+}
+
+function money(n){
+  return Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+' Birr';
+}
+
+function esc(s){
+  return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function applyLang(){
+  const map={
+    hero:'hero',tagline:'tagline',balLabel:'balLabel',playersLabel:'playersLabel',profileBalLabel:'profileBalLabel',
+    play:'play',quick:'quick',depositTile:'depositTile',walletTile:'walletTile',leaderTile:'leaderTile',profileTile:'profileTile',
+    liveTitle:'liveTitle',lobbyHint:'lobbyHint',openLobby:'openLobby',gameTitle:'gameTitle',chooseDesc:'chooseDesc',
+    lastLabel:'lastLabel',chooseCard:'chooseCard',stakeLabel:'stakeLabel',yourCard:'yourCard',calledTitle:'calledTitle',
+    walletTitle:'walletTitle',currentBalLabel:'currentBalLabel',autoNote:'autoNote',depositReq:'depositReq',
+    submitDeposit:'submitDeposit',depositHelp:'depositHelp',txTitle:'txTitle',leaderTitle:'leaderTitle',inviteTitle:'inviteTitle',
+    inviteText:'inviteText',copyBtn:'copyBtn',profileTitle:'profileTitle',profileNote:'profileNote',settings:'settings',
+    navHome:'navHome',navGame:'navGame',navWallet:'navWallet',navLeaders:'navLeaders',navProfile:'navProfile'
+  };
+  for(const [id,key] of Object.entries(map)){
+    const el=document.getElementById(id);
+    if(el)el.textContent=t(key);
+  }
+  document.getElementById('langBtn').textContent=L==='en'?'አማ / EN':'EN / አማ';
+  document.documentElement.lang=L==='am'?'am':'en';
+  const stake=document.getElementById('stake');
+  if(stake){stake.min='10';if(Number(stake.value)<10)stake.value='10';}
+  const amountLabels=document.querySelectorAll('#game .stat span');
+  if(amountLabels.length>=6){
+    amountLabels[0].textContent=L==='en'?'STARTS IN':'የሚጀምረው በ';
+    amountLabels[1].textContent=L==='en'?'PLAYERS':'ተጫዋቾች';
+    amountLabels[2].textContent=L==='en'?'CALLED':'የተጠሩ';
+    amountLabels[3].textContent=L==='en'?'TOTAL BETS':'ጠቅላላ ውርርድ';
+    amountLabels[4].textContent=L==='en'?'WINNER GETS (80%)':'አሸናፊው የሚያገኘው (80%)';
+  }
+}
+
+async function toggleLang(){
+  L=L==='en'?'am':'en';
+  applyLang();
+  try{
+    await api('/api/language',{method:'POST',body:JSON.stringify({language:L})});
+  }catch(e){
+    msg(e.message,true);
+  }
+  renderChoices();
+}
+
+async function boot(){
+  /*
+   * Retry briefly in case the Telegram Web App bridge has not finished
+   * initializing when this page's JavaScript first executes.
+   */
+  let launchData='';
+  for(let i=0;i<10;i++){
+    launchData=init();
+    if(launchData)break;
+    await new Promise(resolve=>setTimeout(resolve,200));
+  }
+
+  if(!launchData){
+    msg(
+      'Telegram did not provide launch data. Close this window and open the Mini App using the Play Now button in your bot chat, not a regular browser link.',
+      true
+    );
+    return;
+  }
+
+  try{
+    me=await api('/api/me');
+    L=me.language||'en';
+    document.getElementById('name').textContent=me.name;
+    document.getElementById('handle').textContent=me.username?'@'+me.username:'Telegram player';
+    document.getElementById('refLink').value=me.referral_link;
+    document.getElementById('refCount').textContent=me.referrals;
+    await refreshGame();
+    await refreshWallet();
+    try{
+      const paymentMethods=await fetch('/api/public-payment-methods').then(r=>r.ok?r.json():({}));
+      mpesaReceivers=Array.isArray(paymentMethods.mpesa_receivers)?paymentMethods.mpesa_receivers:[];
+      cbeBirrReceivers=Array.isArray(paymentMethods.cbe_birr_receivers)?paymentMethods.cbe_birr_receivers:[];
+    }catch(e){mpesaReceivers=[];cbeBirrReceivers=[];}
+    showDepositDetails();updateWithdrawDestination();
+    await refreshLeaders();
+    applyLang();
+    if(interval)clearInterval(interval);
+    interval=setInterval(()=>refreshGame().catch(()=>{}),1000);
+  }catch(e){
+    msg(e.message,true);
+  }
+}
+
+let callSoundEnabled=false;let lastSoundedCount=0;let audioCtx=null;
+function toggleCallSound(){
+ callSoundEnabled=!callSoundEnabled;
+ const btn=document.getElementById('soundToggle');
+ btn.textContent=callSoundEnabled?'🔊 Called-number sound ON':'🔇 Enable called-number sound';
+ btn.classList.toggle('on',callSoundEnabled);
+ if(callSoundEnabled){try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();audioCtx.resume();playCallTone();}catch(e){msg('Sound is not available in this browser.',true);}}
+}
+function playCallTone(){
+ if(!callSoundEnabled)return;
+ try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();const osc=audioCtx.createOscillator();const gain=audioCtx.createGain();osc.type='sine';osc.frequency.setValueAtTime(740,audioCtx.currentTime);osc.frequency.exponentialRampToValueAtTime(520,audioCtx.currentTime+0.18);gain.gain.setValueAtTime(0.0001,audioCtx.currentTime);gain.gain.exponentialRampToValueAtTime(0.13,audioCtx.currentTime+0.025);gain.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+0.24);osc.connect(gain);gain.connect(audioCtx.destination);osc.start();osc.stop(audioCtx.currentTime+0.25);}catch(e){console.log('Call sound unavailable',e);}
+}
+
+async function refreshGame(){
+  G=await api('/api/game');
+  document.getElementById('status').textContent=t(G.status);
+  document.getElementById('gameStatus').textContent=t(G.status);
+  document.getElementById('gameId').textContent='#'+G.id;
+  document.getElementById('homePlayers').textContent=G.player_count;
+  document.getElementById('homeCount').textContent=G.player_count;
+  document.getElementById('count').textContent=G.player_count;
+  document.getElementById('homeTimer').textContent='00:'+String(Math.max(0,G.lobby_seconds)).padStart(2,'0');
+  document.getElementById('timer').textContent='00:'+String(Math.max(0,G.lobby_seconds)).padStart(2,'0');
+  document.getElementById('homeCalled').textContent=G.called.length+'/75';
+  document.getElementById('calledCount').textContent=G.called.length+'/75';
+  document.getElementById('totalBets').textContent=money(G.total_bets||0);
+  document.getElementById('prizeAmount').textContent=money(G.prize_amount||0);
+  document.getElementById('ownerShare').textContent=money(G.owner_share||0);
+  const liveTaken=(G.players||[]).slice().sort((a,b)=>a.cartela_number-b.cartela_number);
+  document.getElementById('takenCount').textContent=liveTaken.length+' taken';
+  document.getElementById('takenList').innerHTML=liveTaken.map(p=>`<span class="chip">#${p.cartela_number} · ${esc(p.name)} · ${money(p.stake)}</span>`).join('')||'No cartelas taken yet.';
+  const last=G.called.length?G.called[G.called.length-1]:null;
+  if(G.called.length>lastSoundedCount){if(lastSoundedCount>0||G.status==='running')playCallTone();lastSoundedCount=G.called.length;}
+  if(G.status==='waiting'&&G.called.length===0)lastSoundedCount=0;
+  document.getElementById('lastNumber').textContent=last===null?'?':String(last);
+  document.getElementById('lastLabel').textContent=last===null?'Waiting for first number':callLabel(last);
+  document.getElementById('allCalled').innerHTML=G.called.slice().reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('')||t('empty');
+  document.getElementById('recent').innerHTML=G.called.slice(-8).reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('');
+  const mine=G.my_cartelas||((G.my_cartela)?[{cartela:G.my_cartela,cartela_number:G.my_cartela_number,stake:0}]:[]);
+  if(mine.length){
+    document.getElementById('selectArea').classList.add('hidden');
+    document.getElementById('playing').classList.remove('hidden');
+    document.getElementById('cardNum').textContent=mine.length+' cartela(s)';
+    document.getElementById('chooseDesc').textContent=G.status==='waiting'?'Cartelas reserved. Game starts in '+G.lobby_seconds+' seconds.':G.status==='running'?'LIVE — watch the called number and mark it on each cartela.':'Round finished.';
+    renderCards(mine,G.called,winCells);
+  }else if(G.status==='waiting'){
+    document.getElementById('selectArea').classList.remove('hidden');
+    document.getElementById('playing').classList.add('hidden');
+    renderChoices();
+  }else{
+    document.getElementById('selectArea').classList.add('hidden');
+    document.getElementById('playing').classList.add('hidden');
+  }
+  if(G.winner){
+    document.getElementById('claimMsg').textContent='🏆 BINGO! '+G.winner.name+' won with Cartela #'+G.winner.cartela_number+' — prize '+money(G.winner.prize||0)+'.';
+    document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
+  }else if(G.status==='running')document.getElementById('claimMsg').classList.add('hidden');
+  if(G.status==='finished'&&!G.winner){document.getElementById('claimMsg').textContent='All 75 numbers were called. No valid BINGO. Next round is opening…';document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');}
+}
+function renderChoices(){
+ const taken=new Set((G?.players||[]).map(p=>Number(p.cartela_number)));
+ const q=Number(document.getElementById('cartelaSearch')?.value||0);let available=0,h='';
+ for(let n=1;n<=200;n++){
+  const used=taken.has(n);if(!used)available++;if(q&&n!==q)continue;
+  h+=`<button type="button" class="pick ${used?'taken':''} ${selectedCartelas.has(n)?'selected':''}" ${used?'disabled':''} aria-label="Cartela ${n}${used?' taken':' available'}" onclick="selectCartela(${n})">${n}</button>`;
+ }
+ document.getElementById('choices').innerHTML=h||'<div class="muted small">No cartela matches that number.</div>';
+ document.getElementById('availableCount').textContent=available+' available';
+ updateSelectionSummary();
+ document.getElementById('startGameBtn').disabled=!selectedCartelas.size||[...selectedCartelas].some(n=>taken.has(n))||G?.status!=='waiting';
+}
+function selectCartela(n){
+ const taken=new Set((G?.players||[]).map(p=>Number(p.cartela_number)));if(taken.has(n)||G?.status!=='waiting')return;
+ if(selectedCartelas.has(n))selectedCartelas.delete(n);else selectedCartelas.add(n);
+ const search=document.getElementById('cartelaSearch');if(search)search.value='';renderChoices();
+}
+function updateSelectionSummary(){
+ const stake=Number(document.getElementById('stake')?.value||10),count=selectedCartelas.size;
+ document.getElementById('selectedCartelaLabel').textContent=count?[...selectedCartelas].sort((a,b)=>a-b).map(n=>'#'+n).join(', '):'None';
+ document.getElementById('betSummary').textContent=count?`${count} cartela(s) × ${money(stake)} = ${money(count*stake)} total bet (minimum ${money(10)} per cartela).`:'Select one or more cartelas. Minimum bet is 10 Birr per cartela.';
+}
+async function startSelectedGame(){
+ const stake=Number(document.getElementById('stake').value||0);
+ if(!selectedCartelas.size){msg('Please select at least one available cartela.',true);return;}
+ if(!Number.isFinite(stake)||stake<10||stake>1000){msg('Minimum bet is 10 Birr per cartela.',true);return;}
+ await joinGame([...selectedCartelas],stake);
+ if((G?.my_cartelas||[]).length)go('game');
+}
+async function joinGame(nums,stake){
+ if(busy)return;busy=true;document.getElementById('startGameBtn').disabled=true;
+ try{
+  await api('/api/game/join',{method:'POST',body:JSON.stringify({cartela_numbers:nums,stake})});
+  winCells=[];for(const n of nums)manualMarksByCard[n]=new Set([0]);
+  selectedCartelas.clear();msg(`${nums.length} cartela(s) reserved. Total bet: ${money(nums.length*stake)}.`);
+  telegramApp()?.HapticFeedback?.notificationOccurred('success');await refreshGame();
+ }catch(e){msg(e.message,true);await refreshGame().catch(()=>{});}
+ finally{busy=false;if(G&&!(G.my_cartelas||[]).length)renderChoices();}
+}
+function callLabel(n){
+  n=Number(n);
+  return (n<=15?'B':n<=30?'I':n<=45?'N':n<=60?'G':'O')+n;
+}
+
+function renderCards(cards,called,wins=[]){
+ const host=document.getElementById('myCards');
+ host.innerHTML=cards.map(entry=>{
+  const n=Number(entry.cartela_number),card=entry.cartela;const marks=manualMarksByCard[n]||new Set([0]);manualMarksByCard[n]=marks;
+  const winSet=new Set((wins||[]).map(x=>x.join(',')));
+  const cells=card.flatMap((row,r)=>row.map((v,c)=>{
+   const marked=v===0||marks.has(v),wasCalled=v===0||called.includes(v);
+   return `<button type="button" class="cell ${marked?'marked':''} ${!wasCalled?'uncalled':''} ${winSet.has([r,c].join(','))?'win':''}" ${v===0||!called.includes(v)||G.status!=='running'?'disabled':''} onclick="toggleMark(${n},${v})" aria-label="Cartela ${n}, number ${v}">${v===0?'★':v}</button>`;
+  })).join('');
+  return `<div class="my-card-item"><div class="card-caption"><b>Cartela #${n}</b><span class="muted">Bet ${money(entry.stake||0)}</span></div><div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div><div class="card">${cells}</div><button class="danger wide" style="padding:10px" onclick="claim(${n})" ${G.status!=='running'?'disabled':''}>🏆 BINGO! — Cartela #${n}</button></div>`;
+ }).join('');
+}
+function toggleMark(cartela,n){
+ n=Number(n);cartela=Number(cartela);if(!G||!G.called.includes(n)||n===0)return;
+ const marks=manualMarksByCard[cartela]||(manualMarksByCard[cartela]=new Set([0]));
+ if(marks.has(n))marks.delete(n);else marks.add(n);
+ renderCards(G.my_cartelas||[],G.called,winCells);
+}
+async function claim(cartela){
+ try{
+  const marks=manualMarksByCard[Number(cartela)]||new Set([0]);
+  const r=await api('/api/game/claim',{method:'POST',body:JSON.stringify({cartela_number:Number(cartela),marked:[...marks]})});
+  winCells=r.pattern||[];
+  document.getElementById('claimMsg').textContent=`🏆 Valid BINGO! Prize: ${money(r.prize)} (80% of ${money(r.total_bets)} total bets).`;
+  document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
+  await refreshGame();await refreshWallet();telegramApp()?.HapticFeedback?.notificationOccurred('success');
+ }catch(e){document.getElementById('claimMsg').textContent=e.message;document.getElementById('claimMsg').className='notice err';document.getElementById('claimMsg').classList.remove('hidden');}
+}
+
+async function refreshWallet(){
+  try{
+    const w=await api('/api/wallet');
+    if(me)me.balance=w.balance;
+    document.getElementById('homeBal').textContent=money(w.balance);
+    document.getElementById('walletBal').textContent=money(w.available_balance??w.balance);
+    const profileBal=document.getElementById('profileBal');if(profileBal)profileBal.textContent=money(w.available_balance??w.balance);
+    document.getElementById('deposits').innerHTML=w.deposits.map(d=>
+      `<div class="row"><span>${esc(d.provider)}<br><small class="muted">${esc(d.reference)} · ${esc(d.status)}</small></span><b>${money(d.amount)}</b></div>`
+    ).join('')||t('empty');
+    document.getElementById('withdrawals').innerHTML=(w.withdrawals||[]).map(x=>
+      `<div class="row"><span>${esc(x.provider)} · ${esc(x.destination)}<br><small class="muted">#${x.id} · ${esc(x.status)}</small></span><b>${money(x.amount)}</b></div>`
+    ).join('')||t('empty');
+    document.getElementById('transactions').innerHTML=w.transactions.map(x=>
+      `<div class="row"><span>${esc(x.type)}<br><small class="muted">${esc(x.description||'')}</small></span><span>${money(x.amount)}<br><small>${esc(x.status)}</small></span></div>`
+    ).join('')||t('empty');
+  }catch(e){
+    console.log('Wallet refresh failed:',e);
+  }
+}
+
+async function deposit(){
+ if(depositBusy)return;
+ const button=document.getElementById('submitDeposit');
+ const originalLabel=button.textContent;
+ try{
+  const amount=Number(document.getElementById('amount').value);
+  const reference=document.getElementById('reference').value.trim();
+  const message=document.getElementById('paymentMessage').value.trim();
+  const provider=document.getElementById('provider').value;
+  const accountNumber=document.getElementById('payerPhone')?.value.trim()||'';
+  if(!amount||amount<=0)throw Error('Enter the exact amount you deposited.');
+  if(message.length<8)throw Error('Paste the official receipt link or complete payment confirmation SMS first.');
+  if(provider==='cbe_birr'&&accountNumber.replace(/\D/g,'').length<9)throw Error('Enter the phone number used to make the CBE Birr payment.');
+  const payload={provider,amount,reference:reference||null,message,account_number:provider==='cbe_birr'?accountNumber:null};
+  depositBusy=true;button.disabled=true;
+  let result=null;
+  const maxChecks=20; // Recheck transient bank outages for up to about four minutes.
+  for(let attempt=0;attempt<maxChecks;attempt++){
+   button.textContent=attempt===0?'Checking payment…':`Waiting for bank verification (${attempt+1}/${maxChecks})…`;
+   result=await api('/api/deposits',{method:'POST',body:JSON.stringify(payload)});
+   if(result.status==='verified'){
+    msg(result.message||'Payment verified and wallet credited automatically.');
+    document.getElementById('paymentMessage').value='';
+    document.getElementById('reference').value='';
+    await refreshWallet();
+    return;
+   }
+   await refreshWallet();
+   if(!result.retryable) {
+    msg(result.message||'Payment is not verified yet. No wallet credit has been made.',true);
+    return;
+   }
+   depositStatus((result.message||'Bank verification is temporarily unavailable.')+' Checking again automatically; keep this screen open.');
+   await new Promise(resolve=>setTimeout(resolve,12000));
+  }
+  depositStatus('Check.et or the bank is still unavailable. Your deposit remains pending and has not been credited. Keep this screen open and press Verify receipt & submit deposit to retry.',true);
+ }catch(e){msg(e.message,true);}
+ finally{depositBusy=false;button.disabled=false;button.textContent=originalLabel;}
+}
+
+function walletTab(tab){
+  document.querySelectorAll('[data-wallet-tab]').forEach(b=>b.classList.toggle('active',b.dataset.walletTab===tab));
+  document.querySelectorAll('.wallet-pane').forEach(p=>p.classList.toggle('active',p.id===tab+'Pane'));
+}
+const depositRecipients=[
+ {title:'Nahom Million',detail:'0943912235',provider:'Phone recipient'},
+ {title:'Tewdros Getu',detail:'0937189718',provider:'Phone recipient'},
+ {title:'Tinsae Merga',detail:'0934417096',provider:'Phone recipient'},
+ {title:'Nahom Million',detail:'1000261740528',provider:'CBE account'},
+ {title:'Tewodros Getu',detail:'1000216646472',provider:'CBE account'}
+];
+function chooseProvider(p){document.getElementById('provider').value=p;document.querySelectorAll('[data-provider-brand]').forEach(b=>b.classList.toggle('active',b.dataset.providerBrand===p));showDepositDetails();}
+function showDepositDetails(){
+ const p=document.getElementById('provider').value;
+ document.querySelectorAll('[data-provider-brand]').forEach(b=>b.classList.toggle('active',b.dataset.providerBrand===p));
+ const host=document.getElementById('depositDetails');
+ const payerPhoneWrap=document.getElementById('payerPhoneWrap');
+ if(payerPhoneWrap)payerPhoneWrap.classList.toggle('hidden',p!=='cbe_birr');
+ if(p!=='cbe_birr'&&document.getElementById('payerPhone'))document.getElementById('payerPhone').value='';
+ if(p==='mpesa'){
+  host.innerHTML=mpesaReceivers.length
+   ? '<div class="notice">Send only to one of these configured M-Pesa receiving numbers, then paste the official payment confirmation below.</div>'+mpesaReceivers.map(n=>`<div class="provider-row"><div class="provider-logo">M</div><div class="details"><b>M-Pesa receiving number</b><div class="muted small">${esc(n)}</div></div><button class="copy-small" onclick="copyValue('${esc(n)}')">Copy</button></div>`).join('')
+   : '<div class="notice">M-Pesa receiving numbers are not configured on the server. Set MPESA_RECEIVER_NUMBERS in Render before accepting M-Pesa deposits.</div>';
+  return;
+ }
+ if(p==='cbe_birr'){
+  const receivers=cbeBirrReceivers.length?cbeBirrReceivers:depositRecipients.filter(x=>x.provider==='Phone recipient').map(x=>({name:x.title,number:x.detail}));
+  host.innerHTML='<div class="notice">Send your CBE Birr deposit to one of these phone numbers, reusing the Telebirr receiving numbers as requested. Enter your own payer phone number below so Check.et can verify the receipt.</div>'+receivers.map(x=>`<div class="provider-row"><div class="provider-logo"><img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/cbe_birr_normal/cbe_birr_normal.svg" alt="CBE Birr logo" onerror="this.style.display='none';this.parentElement.textContent='CB'"></div><div class="details"><b>${esc(x.name)}</b><div class="muted small">CBE Birr receiving phone: ${esc(x.number)}</div></div><button class="copy-small" onclick="copyValue('${esc(x.number)}')">Copy</button></div>`).join('');
+  return;
+ }
+ if(p==='ebirr'){
+  host.innerHTML='<div class="notice">eBirr is not currently supported by the configured Check.et verification API. This app cannot automatically credit eBirr deposits until an official verification integration is configured.</div>';
+  return;
+ }
+ const phoneRecipients=depositRecipients.filter(x=>x.provider==='Phone recipient');
+ const rows=p==='cbe_bank'?depositRecipients.filter(x=>x.provider==='CBE account'):phoneRecipients;
+ const logo=p==='cbe_bank'
+  ? '<img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/commercial_bank_of_ethiopia/commercial_bank_of_ethiopia.svg" alt="CBE logo">'
+  : p==='ebirr'
+    ? '<img src="https://visit.ebirr.com/img/logo.webp" alt="Official eBirr logo" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'grid\'"><span class="brand-fallback" style="display:none">eB</span>'
+    : '<img src="https://raw.githubusercontent.com/Chapa-Et/ethiopianlogos/main/logos/tele_birr/tele_birr.svg" alt="Telebirr logo">';
+ host.innerHTML=rows.map(x=>`<div class="provider-row"><div class="provider-logo">${logo}</div><div class="details"><b>${esc(x.title)}</b><div class="muted small">${esc(x.detail)}</div><small class="muted">${p==='ebirr'?'eBirr phone recipient':x.provider}</small></div><button class="copy-small" onclick="copyValue('${x.detail}')">Copy</button></div>`).join('');
+}
+async function copyValue(value){
+ try{
+  const webApp=telegramApp();
+  if(webApp?.clipboard?.writeText)await webApp.clipboard.writeText(value);
+  else await navigator.clipboard.writeText(value);
+  msg('Copied: '+value);
+ }catch(e){msg('Copy failed. Please copy manually: '+value,true);}
+}
+function updateWithdrawDestination(){
+ const p=document.getElementById('withdrawProvider').value;
+ const bank=p==='cbe_bank';
+ document.getElementById('withdrawDestinationLabel').textContent=bank?'CBE account number':'Phone number';
+ document.getElementById('withdrawDestination').placeholder=bank?'Enter CBE account number':'Enter phone number';
+}
+document.getElementById('transferMethod').addEventListener('change',()=>{
+ const phone=document.getElementById('transferMethod').value==='phone';
+ document.getElementById('transferRecipientLabel').textContent=phone?'Player phone number':'Telegram username';
+ document.getElementById('transferRecipient').placeholder=phone?'Enter registered phone number':'Enter @username';
+});
+async function withdraw(){
+ try{
+  const amount=Number(document.getElementById('withdrawAmount').value);
+  const provider=document.getElementById('withdrawProvider').value;
+  const destination=document.getElementById('withdrawDestination').value.trim();
+  if(!amount||amount<=0||!destination)throw Error('Enter an amount and destination details.');
+  const label=provider==='cbe_bank'?'CBE account':'phone number';
+  if(!confirm(`Submit withdrawal of ${money(amount)} using ${provider}? Check your ${label}.`))return;
+  const d=await api('/api/withdrawals',{method:'POST',body:JSON.stringify({amount,provider,destination})});
+  msg(d.message||'Withdrawal request submitted.');
+  document.getElementById('withdrawAmount').value='';
+  document.getElementById('withdrawDestination').value='';
+  await refreshWallet();
+ }catch(e){msg(e.message,true);}
+}
+async function transfer(){
+ try{
+  const method=document.getElementById('transferMethod').value;
+  const recipient=document.getElementById('transferRecipient').value.trim();
+  const amount=Number(document.getElementById('transferAmount').value);
+  if(!recipient||!amount||amount<=0)throw Error('Enter a recipient and transfer amount.');
+  const label=method==='phone'?'phone number':'Telegram username';
+  if(!confirm(`Transfer ${money(amount)} to the player found by ${label} ${recipient}?`))return;
+  const d=await api('/api/transfers',{method:'POST',body:JSON.stringify({method,recipient,amount})});
+  msg(`Transferred ${money(amount)} to ${d.recipient.name}.`);
+  document.getElementById('transferRecipient').value='';
+  document.getElementById('transferAmount').value='';
+  await refreshWallet();
+ }catch(e){msg(e.message,true);}
+}
+
+async function refreshLeaders(){
+  try{
+    const d=await api('/api/leaderboard');
+    document.getElementById('leaders').innerHTML=d.players.map((p,i)=>
+      `<div class="row" data-player-id="${p.telegram_id||''}"><b>${['🥇','🥈','🥉'][i]||'#'+(i+1)} ${esc(p.name)}</b><span class="gold">${p.wins} wins</span></div>`
+    ).join('')||t('empty');
+  }catch(e){
+    console.log('Leaderboard refresh failed:',e);
+  }
+}
+
+async function refreshMe(){
+  try{
+    me=await api('/api/me');
+    document.getElementById('refLink').value=me.referral_link;
+    document.getElementById('refCount').textContent=me.referrals;
+    document.getElementById('name').textContent=me.name;
+    document.getElementById('handle').textContent=me.username?'@'+me.username:'Telegram player';
+  }catch(e){
+    msg(e.message,true);
+  }
+}
+
+async function copyLink(){
+  try{
+    const link=document.getElementById('refLink').value;
+    const webApp=telegramApp();
+    if(webApp?.clipboard?.writeText)await webApp.clipboard.writeText(link);
+    else await navigator.clipboard.writeText(link);
+    msg(t('copied'));
+  }catch(e){
+    msg('Copy link manually.',true);
+  }
+}
+
+if(tg?.BackButton){
+  tg.BackButton.onClick(()=>go('home'));
+}
+
+/* Start the Mini App only after giving Telegram's bridge a moment to load. */
+boot();
+</script>
+</body>
+</html>
