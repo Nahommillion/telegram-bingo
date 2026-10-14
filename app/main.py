@@ -239,7 +239,17 @@ app=FastAPI(title="Cartela Bingo",lifespan=lifespan);app.mount("/static",StaticF
 @app.get("/")
 async def root():return {"app":"Cartela Bingo","mini_app":"/app","health":"/health"}
 @app.get("/app",response_class=HTMLResponse)
-async def mini():return HTMLResponse((STATIC/"index.html").read_text(encoding="utf-8"))
+async def mini():
+ # Serve the current frontend directly and prevent browsers/proxies from reusing an old HTML page.
+ # This is a presentation/deployment diagnostic only; payment and wallet routes are unchanged.
+ html=(STATIC/"index.html").read_text(encoding="utf-8")
+ return HTMLResponse(html,headers={
+  "Cache-Control":"no-store, no-cache, must-revalidate, max-age=0",
+  "Pragma":"no-cache",
+  "Expires":"0",
+  "X-Frontend-Source":"app/static/index.html",
+  "X-Frontend-Build":"graphics-addition-20261014",
+ })
 @app.get("/health")
 async def health():return {"status":"ok"}
 @app.get("/health/database")
