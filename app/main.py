@@ -271,17 +271,17 @@ async def loop():
        async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET lobby_started_at=COALESCE(lobby_started_at,NOW()) WHERE id=:i AND status='waiting'"),{"i":game["id"]})
       elapsed=now-game["lobby_started_at"];game["seconds"]=max(0,math.ceil(30-elapsed))
       if elapsed>=30:
-       # Always start at 00:00, even when nobody has placed a bet.
-       # A paid cartela can end the round early; an empty round keeps calling
-       # numbers and finishes naturally when the number sequence is exhausted.
        unique_players={p.get("user_id") for p in game["players"].values()}
-       game["status"]="running";game["seconds"]=0
-       game["seq"]=[n for n in range(1,76) if n not in set(game["called"])]
-       random.shuffle(game["seq"]);game["last"]=now
-       async with engine.begin() as c:
-        await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
-        await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":game["id"]})
-       logger.info("Bet %s Birr game #%s started at countdown zero with %s players",key,game["id"],len(unique_players))
+       if len(unique_players)<2:
+        # Do not start a real-money round with fewer than two distinct players.
+        game["lobby_started_at"]=now;game["seconds"]=30
+        async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET lobby_started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
+       else:
+        game["status"]="running";game["seconds"]=0;game["seq"]=[n for n in range(1,76) if n not in set(game["called"])];random.shuffle(game["seq"]);game["last"]=now
+        async with engine.begin() as c:
+         await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
+         await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":game["id"]})
+        logger.info("Bet %s Birr game #%s started with %s players",key,game["id"],len(unique_players))
      elif game["status"]=="running" and now-game["last"]>=1.5:
       if game["seq"]:
        game["called"].append(game["seq"].pop(0));game["last"]=now
