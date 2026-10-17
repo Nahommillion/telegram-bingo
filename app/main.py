@@ -119,7 +119,10 @@ def kb(l):
     one_time_keyboard=False,
     is_persistent=False
 )
-def wel(l):return ("🎉🎱 እንኳን ወደ Cartela Bingo በደህና መጡ!\n🇪🇹 የኢትዮጵያ ቀለሞች • ቢንጎ • ደስታ\n👇 ከታች ያለውን አዝራር ይምረጡ!" if l=="am" else "🎉🎱 Welcome to Cartela Bingo!\n🇪🇹 Ethiopian colors • Bingo • Fun\n👇 Choose an option below!")
+def wel(l):
+ return ("🎉🎱 እንኳን ወደ Goferehabesha Bingo በደህና መጡ!\n🇪🇹 የኢትዮጵያ ቢንጎ ቤተሰብ\n👇 ከታች ያለውን ምናሌ ይጠቀሙ።" if l=="am" else "🎉🎱 Welcome to Goferehabesha Bingo!\n🇪🇹 Welcome to the Goferehabesha Bingo family.\n👇 Choose an option from the menu below.")
+def registration_prompt(l):
+ return ("🎉🎱 እንኳን ወደ Goferehabesha Bingo በደህና መጡ!\n\n1️⃣ ከታች ያለውን 📱 ስልክ ቁጥር አጋራ ቁልፍ ይጫኑ።\n2️⃣ የራስዎን ስልክ ቁጥር ያጋሩና ያረጋግጡ።\n3️⃣ ምዝገባዎ ከተጠናቀቀ በኋላ ገንዘብ ያስገቡና መጫወት ይጀምሩ! 🚀\n\n👇 ለመጀመር ስልክ ቁጥርዎን ያጋሩ።" if l=="am" else "🎉🎱 Welcome to Goferehabesha Bingo!\n\n1️⃣ Tap 📱 Share my phone number below.\n2️⃣ Share and confirm your own phone number.\n3️⃣ Once registration is complete, add funds and start playing! 🚀\n\n👇 Share your phone number to get started.")
 async def sendwel(up,l=None):
  l=l or await langof(up.effective_user.id); p=STATIC/"bingo.PNG"
  if p.exists():
@@ -127,26 +130,31 @@ async def sendwel(up,l=None):
   except Exception: logger.exception("Welcome image failed; sending text fallback")
  await up.effective_message.reply_text(wel(l),reply_markup=kb(l))
 async def request_contact(up):
+ u=up.effective_user
+ l=await langof(u.id)
+ label="📱 ስልክ ቁጥር አጋራ" if l=="am" else "📱 Share my phone number"
  await up.effective_message.reply_text(
-  "📱 Welcome! Please share your own phone number to register and use Cartela Bingo. Tap the button below.",
-  reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📱 Share my phone number",request_contact=True)]],resize_keyboard=True,one_time_keyboard=True)
+  registration_prompt(l),
+  reply_markup=ReplyKeyboardMarkup([[KeyboardButton(label,request_contact=True)]],resize_keyboard=True,one_time_keyboard=True)
  )
 async def contact(up,ctx):
  u=up.effective_user;m=up.effective_message;ct=m.contact
  await reg(u.id,u.username,u.first_name,"am" if (u.language_code or "").startswith("am") else "en")
+ l=await langof(u.id)
  if not ct or ct.user_id != u.id:
-  await m.reply_text("For security, please share your own contact using the button below.")
+  await m.reply_text("ለደህንነት እባክዎ ከታች ባለው ቁልፍ የራስዎን ስልክ ቁጥር ያጋሩ።" if l=="am" else "For security, please share your own phone number using the button below.")
   await request_contact(up);return
  phone=re.sub(r"[^0-9+]", "", ct.phone_number or "")
  if len(re.sub(r"\D","",phone))<9:
-  await m.reply_text("That phone number does not look valid. Please share your contact again.");await request_contact(up);return
+  await m.reply_text("የስልክ ቁጥሩ ትክክለኛ አይመስልም። እባክዎ እንደገና ያጋሩ።" if l=="am" else "That phone number does not look valid. Please share your contact again.");await request_contact(up);return
  async with engine.begin() as c:
   other=(await c.execute(text("SELECT telegram_id FROM bingo_users WHERE RIGHT(COALESCE(phone_number,''),9)=RIGHT(:p,9) AND telegram_id<>:i LIMIT 1"),{"p":phone,"i":u.id})).scalar_one_or_none()
   if other:
-   await m.reply_text("That phone number is already registered to another Telegram account. Please contact support if this is a mistake.",reply_markup=kb(await langof(u.id)));return
+   await m.reply_text("ይህ ስልክ ቁጥር በሌላ መለያ ተመዝግቧል። እባክዎ ድጋፍን ያነጋግሩ።" if l=="am" else "That phone number is already registered to another account. Please contact support if this is a mistake.",reply_markup=kb(l));return
   await c.execute(text("UPDATE bingo_users SET phone_number=:p,phone_verified=TRUE WHERE telegram_id=:i"),{"p":phone,"i":u.id})
- await m.reply_text("✅ Phone number registered successfully.",reply_markup=kb(await langof(u.id)))
- await sendwel(up)
+ success=(f"🎉 እንኳን ወደ Goferehabesha Bingo ቤተሰብ በደህና መጡ!\n\n✅ ምዝገባዎ በተሳካ ሁኔታ ተጠናቋል!\n📱 ስልክ ቁጥር: {phone}\n\n🎯 አሁን መጫወት ለመጀመር ከታች ያለውን 🎮 አሁን ይጫወቱ ይጫኑ!\n🍀 መልካም ዕድል!" if l=="am" else f"🎉 Welcome to the Goferehabesha Bingo family!\n\n✅ Your registration is complete!\n📱 Phone number: {phone}\n\n🎯 Tap 🎮 Play Now below to start playing!\n🍀 Good luck!")
+ await m.reply_text(success,reply_markup=kb(l))
+ await sendwel(up,l)
 async def start(up,ctx):
  logger.info("Received /start update")
  u=up.effective_user; await reg(u.id,u.username,u.first_name,"am" if (u.language_code or "").startswith("am") else "en")
@@ -194,8 +202,15 @@ async def bottext(up,ctx):
   await m.reply_text(f"💰 {b} Birr",reply_markup=kb(l))
  elif a=="deposit":await m.reply_text("Create a request in Wallet. Balance is credited only after a trusted payment record matches.",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💳 Open Wallet",web_app=WebAppInfo(url=WEB+"?tab=wallet"))]]))
  elif a=="support":await m.reply_text(SUPPORT or "Support contact not configured.",reply_markup=kb(l))
- elif a=="help":await m.reply_text("Choose a cartela, join the lobby, watch numbers marked automatically, then press BINGO. The server verifies the claim.",reply_markup=kb(l))
- elif a=="patterns":await m.reply_text("🏆 Horizontal, vertical, or diagonal line. Center is free.",reply_markup=kb(l))
+ elif a=="help":
+  help_en=("🎱 GOFEREHABESHA BINGO — HOW TO PLAY\n\nWELCOME! Follow these steps to play:\n\n1️⃣ Register: send your own phone number using the 📱 Share my phone number button.\n2️⃣ Deposit: open Wallet → Deposit in the Mini App, choose an available payment method, and wait until your payment is verified and your wallet is credited.\n3️⃣ Join a game: tap 🎮 Play Now, choose your bet (minimum 10 Birr per cartela), select available cartelas (1–200), and confirm your selection. Green cartelas are available; black cartelas are taken.\n4️⃣ Wait for the 30-second countdown. A round starts only if at least 2 different players have joined. If fewer than 2 players have joined when the countdown ends, the round does not start and the countdown restarts.\n5️⃣ When the game starts, cartela selection closes and numbers are called from 1 to 75. Watch your cartela and mark the numbers that are called.\n6️⃣ Winning patterns: complete one full horizontal row, one full vertical column, either diagonal, or all four corners. The center square is free. The game checks the winning patterns automatically and stops when a valid winner is confirmed.\n7️⃣ The winner receives 80% of the total bets. If another player wins first, the round ends and other players cannot claim that round.\n\n⚠️ Keep the Mini App open during the game. If number audio is muted, tap Enable called-number sound. Play fairly and good luck!")
+  help_am=("🎱 GOFEREHABESHA BINGO — የጨዋታ መመሪያ\n\nእንኳን ወደ ጨዋታው በደህና መጡ! ለመጫወት እነዚህን ደረጃዎች ይከተሉ፦\n\n1️⃣ ምዝገባ፦ 📱 ስልክ ቁጥር አጋራ የሚለውን ቁልፍ በመጠቀም የራስዎን ስልክ ቁጥር ያጋሩ።\n2️⃣ ገንዘብ ማስገባት፦ በMini App ውስጥ Wallet → Deposit ይክፈቱ፣ ከሚገኙት የክፍያ ዘዴዎች አንዱን ይምረጡ። ክፍያው እስኪረጋገጥና ገንዘቡ ወደ ዋሌትዎ እስኪገባ ይጠብቁ።\n3️⃣ ጨዋታ መቀላቀል፦ 🎮 አሁን ይጫወቱ ይጫኑ፣ የውርርድ መጠንዎን (በእያንዳንዱ ካርቴላ ቢያንስ 10 ብር) ይምረጡ፣ ከ1–200 ያሉ ክፍት ካርቴላዎችን መርጠው ያረጋግጡ። አረንጓዴ ካርቴላ ክፍት ነው፤ ጥቁር ካርቴላ ተይዟል።\n4️⃣ የ30 ሰከንድ ቆጠራውን ይጠብቁ። ጨዋታው የሚጀምረው ቢያንስ 2 የተለያዩ ተጫዋቾች ሲቀላቀሉ ብቻ ነው። ቆጠራው ሲያበቃ ከ2 በታች ተጫዋቾች ካሉ ጨዋታው አይጀምርም፤ ቆጠራው እንደገና ይጀምራል።\n5️⃣ ጨዋታው ሲጀምር ካርቴላ መምረጥ ይዘጋል። ከ1 እስከ 75 ያሉ ቁጥሮች ይጠራሉ። በካርቴላዎ ላይ የወጡትን ቁጥሮች እየተከታተሉ ምልክት ያድርጉ።\n6️⃣ ማሸነፊያ ቅጦች፦ አንድ ሙሉ አግድም መስመር፣ አንድ ሙሉ ቁልቁል መስመር፣ ከሁለቱ ዲያጎናሎች አንዱ ወይም አራቱም ጠርዞች ሲሟሉ ያሸንፋሉ። መካከለኛው ሳጥን ነፃ ነው። ሰርቨሩ ማሸነፊያ ቅጦቹን በራስ-ሰር ያረጋግጣል፣ አሸናፊ ሲረጋገጥም ጨዋታው ይቆማል።\n7️⃣ አሸናፊው ከጠቅላላ ውርርድ 80% ያገኛል። ሌላ ተጫዋች ቀድሞ ካሸነፈ ያ ዙር ይጠናቀቃል።\n\n⚠️ በጨዋታው ጊዜ Mini App ክፍት ያድርጉ። የቁጥር ድምፅ ከጠፋ Enable called-number sound የሚለውን ይጫኑ። መልካም ዕድል!")
+  await m.reply_text(help_am if l=="am" else help_en,reply_markup=kb(l))
+ elif a=="patterns":
+  caption=("🏆 የማሸነፊያ ቅጦች\n• አግድም መስመር\n• ቁልቁል መስመር\n• ከሁለቱ ዲያጎናሎች አንዱ\n• አራቱም ጠርዞች\n⭐ መካከለኛው ሳጥን ነፃ ነው።" if l=="am" else "🏆 WINNING PATTERNS\n• Horizontal row\n• Vertical column\n• Either diagonal\n• All four corners\n⭐ The center square is free.")
+  pattern_image=STATIC/"bingo_patterns.png"
+  if pattern_image.exists(): await m.reply_photo(str(pattern_image),caption=caption,reply_markup=kb(l))
+  else: await m.reply_text(caption,reply_markup=kb(l))
  elif a=="rename":ctx.user_data["rename"]=True;await m.reply_text("Send your display name.")
  elif a=="invite":
   me=await ctx.bot.get_me();await m.reply_text(f"👥 Your personal invite link:\nhttps://t.me/{me.username}?start=ref_{u.id}",reply_markup=kb(l))
