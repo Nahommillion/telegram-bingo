@@ -52,7 +52,7 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
 .field{width:100%;padding:12px;background:#061727;color:white;border:1px solid #31556b;border-radius:12px;margin:7px 0 12px}
 .cardgrid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;max-height:48vh;overflow:auto;padding:2px}
 .pick{background:#12a968;border:1px solid #65f0b0;border-radius:10px;padding:11px 3px;color:white;font-weight:900;min-height:44px}
-.pick.selected{border:3px solid var(--yellow);background:#22543f;box-shadow:0 0 0 2px #ffd44733}
+.pick.selected{border:3px solid var(--yellow);background:#05080c;color:#fff;box-shadow:0 0 0 2px #ffd44733}
 .pick.taken{background:#05080c!important;border-color:#30343a!important;color:#78818a!important;opacity:1;filter:none;text-decoration:line-through}
 .pick:disabled{cursor:not-allowed}
 .selection-summary{display:flex;gap:10px;align-items:center;justify-content:space-between;background:#102d40;border:1px solid #2a5c6d;border-radius:12px;padding:10px;margin:10px 0}
@@ -548,17 +548,34 @@ async function boot(){
   }
 }
 
-let callSoundEnabled=false;let lastSoundedCount=0;let audioCtx=null;
-function toggleCallSound(){
+let callSoundEnabled=false;let lastSoundedCount=0;let audioCtx=null;let soundPrimed=false;
+async function toggleCallSound(){
  callSoundEnabled=!callSoundEnabled;
  const btn=document.getElementById('soundToggle');
  btn.textContent=callSoundEnabled?t('soundOn'):t('soundEnable');
  btn.classList.toggle('on',callSoundEnabled);
- if(callSoundEnabled){try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();audioCtx.resume();playCallTone();}catch(e){msg('Sound is not available in this browser.',true);}}
+ if(callSoundEnabled){
+  try{
+   const AC=window.AudioContext||window.webkitAudioContext;
+   if(AC){audioCtx=audioCtx||new AC();if(audioCtx.state==='suspended')await audioCtx.resume();soundPrimed=audioCtx.state==='running';}
+   playCallTone(null,true);
+   if(!AC&&!('speechSynthesis' in window))msg('This browser does not support called-number sound.',true);
+  }catch(e){console.log('Sound activation issue',e);msg('Tap Enable called-number sound again to allow audio.',true);}
+ }
 }
-function playCallTone(){
+function playCallTone(number,preview=false){
  if(!callSoundEnabled)return;
- try{audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();const osc=audioCtx.createOscillator();const gain=audioCtx.createGain();osc.type='sine';osc.frequency.setValueAtTime(740,audioCtx.currentTime);osc.frequency.exponentialRampToValueAtTime(520,audioCtx.currentTime+0.18);gain.gain.setValueAtTime(0.0001,audioCtx.currentTime);gain.gain.exponentialRampToValueAtTime(0.13,audioCtx.currentTime+0.025);gain.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+0.24);osc.connect(gain);gain.connect(audioCtx.destination);osc.start();osc.stop(audioCtx.currentTime+0.25);}catch(e){console.log('Call sound unavailable',e);}
+ let tonePlayed=false;
+ try{
+  const AC=window.AudioContext||window.webkitAudioContext;
+  if(AC){audioCtx=audioCtx||new AC();if(audioCtx.state==='running'){
+   const osc=audioCtx.createOscillator(),gain=audioCtx.createGain();osc.type='sine';osc.frequency.setValueAtTime(preview?740:680,audioCtx.currentTime);osc.frequency.exponentialRampToValueAtTime(preview?520:480,audioCtx.currentTime+0.18);gain.gain.setValueAtTime(0.0001,audioCtx.currentTime);gain.gain.exponentialRampToValueAtTime(0.12,audioCtx.currentTime+0.025);gain.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+0.24);osc.connect(gain);gain.connect(audioCtx.destination);osc.start();osc.stop(audioCtx.currentTime+0.25);tonePlayed=true;
+  }}
+ }catch(e){console.log('Call tone unavailable',e);}
+ if(!preview&&number!=null&&'speechSynthesis' in window&&typeof SpeechSynthesisUtterance!=='undefined'){
+  try{window.speechSynthesis.cancel();const utter=new SpeechSynthesisUtterance(callLabel(number).replace(/([BINGO])([0-9]+)/,'$1 $2'));utter.lang='en-US';utter.rate=0.9;utter.pitch=1.05;utter.volume=1;window.speechSynthesis.speak(utter);return;}catch(e){console.log('Spoken number unavailable',e);}
+ }
+ if(!tonePlayed&&number!=null)console.log('Browser audio is unavailable; spoken-number audio was attempted where supported.');
 }
 
 async function refreshGame(){
@@ -575,16 +592,22 @@ async function refreshGame(){
   document.getElementById('calledCount').textContent=G.called.length+'/75';
   document.getElementById('totalBets').textContent=money(G.total_bets||0);
   document.getElementById('prizeAmount').textContent=money(G.prize_amount||0);
-  const liveTaken=(G.players||[]).slice().sort((a,b)=>a.cartela_number-b.cartela_number);
+  const liveTaken=(G.players||[]).map(p=>({...p,confirmed:true}));
+  const liveNumbers=new Set(liveTaken.map(p=>Number(p.cartela_number)));
+  (G.reservations||[]).forEach(r=>{if(!liveNumbers.has(Number(r.cartela_number)))liveTaken.push({...r,stake:0,reserved:true});});
+  liveTaken.sort((a,b)=>a.cartela_number-b.cartela_number);
   document.getElementById('takenCount').textContent=liveTaken.length+' '+t('takenSuffix');
-  document.getElementById('takenList').innerHTML=liveTaken.map(p=>`<span class="chip">#${p.cartela_number} · ${esc(p.name)} · ${money(p.stake)}</span>`).join('')||'No cartelas taken yet.';
+  document.getElementById('takenList').innerHTML=liveTaken.map(p=>`<span class="chip">#${p.cartela_number} · ${esc(p.name)}${p.reserved?' · reserved':(' · '+money(p.stake))}</span>`).join('')||'No cartelas taken yet.';
   const last=G.called.length?G.called[G.called.length-1]:null;
-  if(G.called.length>lastSoundedCount){if(lastSoundedCount>0||G.status==='running')playCallTone();lastSoundedCount=G.called.length;}
+  if(G.called.length>lastSoundedCount){if(lastSoundedCount>0||G.status==='running')playCallTone(last);lastSoundedCount=G.called.length;}
   if(G.status==='waiting'&&G.called.length===0)lastSoundedCount=0;
   document.getElementById('lastNumber').textContent=last===null?'?':String(last);
   document.getElementById('lastLabel').textContent=last===null?t('waitingFirstNumber'):callLabel(last);
   document.getElementById('allCalled').innerHTML=G.called.slice().reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('')||t('empty');
   document.getElementById('recent').innerHTML=G.called.slice(-8).reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('');
+  const ownReservations=(G.reservations||[]).filter(r=>Number(r.telegram_id)===Number(me?.id)).map(r=>Number(r.cartela_number));
+  for(const n of ownReservations)selectedCartelas.add(n);
+  for(const n of [...selectedCartelas])if(!ownReservations.includes(Number(n)))selectedCartelas.delete(n);
   const mine=G.my_cartelas||((G.my_cartela)?[{cartela:G.my_cartela,cartela_number:G.my_cartela_number,stake:0}]:[]);
   if(mine.length){
     document.getElementById('selectArea').classList.add('hidden');
@@ -606,22 +629,38 @@ async function refreshGame(){
   }else if(G.status==='running')document.getElementById('claimMsg').classList.add('hidden');
   if(G.status==='finished'&&!G.winner){document.getElementById('claimMsg').textContent=t('noWinnerRound');document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');}
 }
+function cartelasTakenByOthers(){
+ const mine=Number(me?.id||0);const taken=new Set((G?.players||[]).map(p=>Number(p.cartela_number)));
+ (G?.reservations||[]).forEach(r=>{if(Number(r.telegram_id)!==mine)taken.add(Number(r.cartela_number));});
+ return taken;
+}
 function renderChoices(){
- const taken=new Set((G?.players||[]).map(p=>Number(p.cartela_number)));
+ const taken=cartelasTakenByOthers();
  const q=Number(document.getElementById('cartelaSearch')?.value||0);let available=0,h='';
  for(let n=1;n<=200;n++){
   const used=taken.has(n);if(!used)available++;if(q&&n!==q)continue;
-  h+=`<button type="button" class="pick ${used?'taken':''} ${selectedCartelas.has(n)?'selected':''}" ${used?'disabled':''} aria-label="Cartela ${n}${used?' taken':' available'}" onclick="selectCartela(${n})">${n}</button>`;
+  h+=`<button type="button" class="pick ${used?'taken':''} ${selectedCartelas.has(n)?'selected':''}" ${used?'disabled':''} aria-label="Cartela ${n}${used?' taken':selectedCartelas.has(n)?' selected':' available'}" onclick="selectCartela(${n})">${n}</button>`;
  }
  document.getElementById('choices').innerHTML=h||`<div class="muted small">${t('noCartelaMatch')}</div>`;
  document.getElementById('availableCount').textContent=available+' '+t('availableSuffix');
  updateSelectionSummary();
  document.getElementById('startGameBtn').disabled=!selectedCartelas.size||[...selectedCartelas].some(n=>taken.has(n))||G?.status!=='waiting';
 }
-function selectCartela(n){
- const taken=new Set((G?.players||[]).map(p=>Number(p.cartela_number)));if(taken.has(n)||G?.status!=='waiting')return;
- if(selectedCartelas.has(n))selectedCartelas.delete(n);else selectedCartelas.add(n);
- const search=document.getElementById('cartelaSearch');if(search)search.value='';renderChoices();
+async function selectCartela(n){
+ n=Number(n);const taken=cartelasTakenByOthers();if(taken.has(n)||G?.status!=='waiting'||busy)return;
+ const search=document.getElementById('cartelaSearch');if(search)search.value='';
+ if(selectedCartelas.has(n)){
+  busy=true;selectedCartelas.delete(n);renderChoices();
+  try{await api('/api/game/release',{method:'POST',body:JSON.stringify({cartela_number:n})});await refreshGame();}
+  catch(e){msg(e.message,true);await refreshGame().catch(()=>{});}
+  finally{busy=false;if(G)renderChoices();}return;
+ }
+ busy=true;renderChoices();
+ try{
+  await api('/api/game/reserve',{method:'POST',body:JSON.stringify({cartela_number:n})});
+  selectedCartelas.add(n);await refreshGame();
+ }catch(e){msg(e.message,true);await refreshGame().catch(()=>{});}
+ finally{busy=false;if(G)renderChoices();}
 }
 function updateSelectionSummary(){
  const stake=Number(document.getElementById('stake')?.value||10),count=selectedCartelas.size;
