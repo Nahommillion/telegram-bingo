@@ -1,5 +1,6 @@
 import os,json,asyncio,random,hmac,hashlib,urllib.parse,time,secrets,logging,math,re,urllib.request,urllib.error
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from decimal import Decimal
 from typing import Optional
@@ -20,7 +21,25 @@ SUPPORT=os.getenv("SUPPORT_URL","").strip(); PAYKEY=os.getenv("PAYMENT_INGEST_AP
 CHECK_ET_API_KEY=os.getenv("CHECK_ET_API_KEY","").strip()
 STATIC=Path(__file__).parent/"static"; STATIC.mkdir(exist_ok=True)
 engine=bot=None; ticker=None; lock=asyncio.Lock()
-g={"id":1,"status":"waiting","seconds":30,"called":[],"players":{},"winner":None,"seq":[],"last":0,"lobby_started_at":None,"finished_at_ts":0}
+_games_by_stake={}
+_current_stake=ContextVar("bingo_current_stake",default="10.00")
+def _stake_key(value): return str(Decimal(str(value)).quantize(Decimal("0.01")))
+def _blank_game(gid, stake, status="waiting", called=None, lobby_started_at=None):
+ return {"id":int(gid),"stake":Decimal(str(stake)),"status":status,"seconds":30,"called":list(called or []),"players":{},"winner":None,"seq":[],"last":0,"lobby_started_at":lobby_started_at,"finished_at_ts":0}
+class _GameProxy:
+ def _game(self):
+  key=_current_stake.get()
+  if key not in _games_by_stake:
+   # Endpoints call ensure_game_for_stake before accessing the proxy.
+   return _games_by_stake.setdefault(key,_blank_game(1,key))
+  return _games_by_stake[key]
+ def __getitem__(self,k): return self._game()[k]
+ def __setitem__(self,k,v): self._game()[k]=v
+ def get(self,k,default=None): return self._game().get(k,default)
+ def update(self,*a,**kw): return self._game().update(*a,**kw)
+ @property
+ def values(self): return self._game().values
+g=_GameProxy()
 PROVIDERS={"telebirr","cbe_birr","ebirr","cbe_bank","mpesa"}
 def dsn(x):
  if x.startswith("postgres://"): return x.replace("postgres://","postgresql+asyncpg://",1)
@@ -53,6 +72,7 @@ async def dbinit():
  "CREATE TABLE IF NOT EXISTS bingo_games(id BIGSERIAL PRIMARY KEY,status TEXT,created_at TIMESTAMPTZ DEFAULT NOW(),started_at TIMESTAMPTZ,finished_at TIMESTAMPTZ,winner_telegram_id BIGINT,called_numbers JSONB DEFAULT '[]'::jsonb)",
  "CREATE TABLE IF NOT EXISTS bingo_game_players(game_id BIGINT,telegram_id BIGINT,cartela_number INT,cartela JSONB,stake NUMERIC(14,2) DEFAULT 0,PRIMARY KEY(game_id,telegram_id),UNIQUE(game_id,cartela_number))",
  "ALTER TABLE bingo_games ADD COLUMN IF NOT EXISTS lobby_started_at TIMESTAMPTZ",
+ "ALTER TABLE bingo_games ADD COLUMN IF NOT EXISTS stake_amount NUMERIC(14,2) NOT NULL DEFAULT 10",
  "CREATE TABLE IF NOT EXISTS bingo_game_entries(game_id BIGINT NOT NULL,telegram_id BIGINT NOT NULL,cartela_number INT NOT NULL,cartela JSONB NOT NULL,stake NUMERIC(14,2) NOT NULL DEFAULT 10,created_at TIMESTAMPTZ DEFAULT NOW(),PRIMARY KEY(game_id,cartela_number),UNIQUE(game_id,telegram_id,cartela_number))",
  "CREATE TABLE IF NOT EXISTS bingo_cartela_reservations(game_id BIGINT NOT NULL,cartela_number INT NOT NULL,telegram_id BIGINT NOT NULL,expires_at TIMESTAMPTZ NOT NULL,PRIMARY KEY(game_id,cartela_number))",
  "CREATE INDEX IF NOT EXISTS ix_bingo_cartela_reservations_expiry ON bingo_cartela_reservations(expires_at)",
@@ -62,19 +82,27 @@ async def dbinit():
  ]
  async with engine.begin() as c:
   for q in qs: await c.execute(text(q))
-  r=await c.execute(text("SELECT id,status,called_numbers,lobby_started_at,started_at,finished_at,winner_telegram_id FROM bingo_games WHERE status IN ('waiting','running') ORDER BY id DESC LIMIT 1")); row=r.first()
-  if row:
-   g.update(id=row[0],status=row[1],called=row[2] or [],lobby_started_at=row[3].timestamp() if row[3] else None,finished_at_ts=0)
-   if g["status"]=="waiting": g["seconds"]=max(0,30-int(time.time()-(g["lobby_started_at"] or time.time()))) if g["lobby_started_at"] else 30
-   else: g["seconds"]=0
-   if g["status"]=="running": g["seq"]=[n for n in range(1,76) if n not in set(g["called"])];random.shuffle(g["seq"]);g["last"]=time.time()
-   pr=await c.execute(text("SELECT p.telegram_id,COALESCE(u.display_name,u.username,'Player'),p.cartela_number,p.cartela,p.stake FROM bingo_game_entries p LEFT JOIN bingo_users u ON u.telegram_id=p.telegram_id WHERE p.game_id=:g"),{"g":g["id"]})
+  # Restore every active stake-specific round, not just the newest global round.
+  r=await c.execute(text("SELECT id,status,called_numbers,lobby_started_at,started_at,finished_at,winner_telegram_id,stake_amount FROM bingo_games WHERE status IN ('waiting','running') OR (status='finished' AND finished_at>NOW()-INTERVAL '10 seconds') ORDER BY id DESC"))
+  rows=r.fetchall(); seen=set()
+  for row in rows:
+   key=_stake_key(row[7] or 10)
+   if key in seen: continue
+   seen.add(key)
+   st=row[1]; started=row[3].timestamp() if row[3] else None
+   state=_blank_game(row[0],key,st,row[2] or [],started)
+   state["seconds"] = max(0,math.ceil(30-(time.time()-(started or time.time())))) if st=="waiting" and started else (30 if st=="waiting" else 0)
+   if st=="running": state["seq"]=[n for n in range(1,76) if n not in set(state["called"])];random.shuffle(state["seq"]);state["last"]=time.time()
+   if st=="finished": state["finished_at_ts"]=time.time()
+   pr=await c.execute(text("SELECT p.telegram_id,COALESCE(NULLIF(u.display_name,''),NULLIF(u.username,''),'Player'),p.cartela_number,p.cartela,p.stake FROM bingo_game_entries p LEFT JOIN bingo_users u ON u.telegram_id=p.telegram_id WHERE p.game_id=:g"),{"g":state["id"]})
    for x in pr.fetchall():
     card=x[3] if isinstance(x[3],list) else json.loads(x[3] or '[]')
-    g["players"][f"{int(x[0])}:{int(x[2])}"] = {"user_id":int(x[0]),"name":x[1],"n":int(x[2]),"card":card,"stake":float(x[4] or 0)}
-  else:
-   g["id"]=(await c.execute(text("INSERT INTO bingo_games(status) VALUES('waiting') RETURNING id"))).scalar_one()
- logger.info("Database initialized; game #%s status=%s players=%s",g["id"],g["status"],len(g["players"]))
+    state["players"][f"{int(x[0])}:{int(x[2])}"]={"user_id":int(x[0]),"name":x[1],"n":int(x[2]),"card":card,"stake":float(x[4] or 0)}
+   _games_by_stake[key]=state
+  if "10.00" not in _games_by_stake:
+   gid=(await c.execute(text("INSERT INTO bingo_games(status,stake_amount) VALUES('waiting',10) RETURNING id"))).scalar_one()
+   _games_by_stake["10.00"]=_blank_game(gid,10)
+ logger.info("Database initialized; active stake rounds=%s",len(_games_by_stake))
 async def reg(tid,username=None,name=None,language="en"):
  async with engine.begin() as c:
   await c.execute(text("INSERT INTO bingo_users(telegram_id,username,display_name,language) VALUES(:i,:u,:n,:l) ON CONFLICT(telegram_id) DO UPDATE SET username=COALESCE(EXCLUDED.username,bingo_users.username),display_name=COALESCE(EXCLUDED.display_name,bingo_users.display_name)"),{"i":tid,"u":username,"n":name,"l":language})
@@ -192,6 +220,25 @@ async def who(req):
  return u
 def newcard():
  cols=[random.sample(range(a,b+1),5) for a,b in [(1,15),(16,30),(31,45),(46,60),(61,75)]];g=[[cols[c][r] for c in range(5)] for r in range(5)];g[2][2]=0;return g
+async def ensure_game_for_stake(stake):
+ key=_stake_key(stake)
+ if key in _games_by_stake: return _games_by_stake[key]
+ async with engine.begin() as c:
+  row=(await c.execute(text("SELECT id,status,called_numbers,lobby_started_at,stake_amount FROM bingo_games WHERE stake_amount=:s AND (status IN ('waiting','running') OR (status='finished' AND finished_at>NOW()-INTERVAL '10 seconds')) ORDER BY id DESC LIMIT 1"),{"s":Decimal(key)})).first()
+  if row:
+   state=_blank_game(row[0],row[4],row[1],row[2] or [],row[3].timestamp() if row[3] else None)
+   if state["status"]=="running": state["seq"]=[n for n in range(1,76) if n not in set(state["called"])];random.shuffle(state["seq"]);state["last"]=time.time()
+   if state["status"]=="waiting" and state["lobby_started_at"]: state["seconds"]=max(0,math.ceil(30-(time.time()-state["lobby_started_at"])))
+   pr=await c.execute(text("SELECT p.telegram_id,COALESCE(NULLIF(u.display_name,''),NULLIF(u.username,''),'Player'),p.cartela_number,p.cartela,p.stake FROM bingo_game_entries p LEFT JOIN bingo_users u ON u.telegram_id=p.telegram_id WHERE p.game_id=:g"),{"g":state["id"]})
+   for x in pr.fetchall():
+    card=x[3] if isinstance(x[3],list) else json.loads(x[3] or '[]')
+    state["players"][f"{int(x[0])}:{int(x[2])}"]={"user_id":int(x[0]),"name":x[1],"n":int(x[2]),"card":card,"stake":float(x[4] or 0)}
+  else:
+   gid=(await c.execute(text("INSERT INTO bingo_games(status,stake_amount) VALUES('waiting',:s) RETURNING id"),{"s":Decimal(key)})).scalar_one()
+   state=_blank_game(gid,key)
+ _games_by_stake[key]=state
+ return state
+
 def winline(card,called):
  m=set(called)|{0};lines=[[(r,c) for c in range(5)] for r in range(5)]+[[(r,c) for r in range(5)] for c in range(5)]+[[(i,i) for i in range(5)],[(i,4-i) for i in range(5)]]
  return next(([[r,c] for r,c in ln] for ln in lines if all(card[r][c] in m for r,c in ln)),None)
@@ -201,38 +248,35 @@ async def loop():
   try:
    async with lock:
     now=time.time()
-    if g["status"]=="waiting":
-     # Keep the 30-second lobby clock cycling even when nobody has joined yet.
-     if g["lobby_started_at"] is None:
-      g["lobby_started_at"]=now
+    for key,game in list(_games_by_stake.items()):
+     stake=Decimal(key)
+     if game["status"]=="waiting":
+      if game["lobby_started_at"] is None:
+       game["lobby_started_at"]=now
+       async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET lobby_started_at=COALESCE(lobby_started_at,NOW()) WHERE id=:i AND status='waiting'"),{"i":game["id"]})
+      elapsed=now-game["lobby_started_at"];game["seconds"]=max(0,math.ceil(30-elapsed))
+      if elapsed>=30 and game["players"]:
+       game["status"]="running";game["seconds"]=0;game["seq"]=[n for n in range(1,76) if n not in set(game["called"])];random.shuffle(game["seq"]);game["last"]=now
+       async with engine.begin() as c:
+        await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
+        await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":game["id"]})
+       logger.info("Bet %s Birr game #%s started with %s players",key,game["id"],len({p.get("user_id") for p in game["players"].values()}))
+      elif elapsed>=30:
+       game["lobby_started_at"]=now;game["seconds"]=30
+       async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET lobby_started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
+     elif game["status"]=="running" and now-game["last"]>=1.25:
+      if game["seq"]:
+       game["called"].append(game["seq"].pop(0));game["last"]=now
+       async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET called_numbers=CAST(:n AS jsonb) WHERE id=:i AND status='running'"),{"n":json.dumps(game["called"]),"i":game["id"]})
+      else:
+       game["status"]="finished";game["finished_at_ts"]=now
+       async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),called_numbers=CAST(:n AS jsonb) WHERE id=:i"),{"n":json.dumps(game["called"]),"i":game["id"]})
+     elif game["status"]=="finished" and now-(game.get("finished_at_ts") or now)>=5:
       async with engine.begin() as c:
-       await c.execute(text("UPDATE bingo_games SET lobby_started_at=COALESCE(lobby_started_at,NOW()) WHERE id=:i AND status='waiting'"),{"i":g["id"]})
-     elapsed=now-g["lobby_started_at"]
-     g["seconds"]=max(0,math.ceil(30-elapsed))
-     if elapsed>=30 and g["players"]:
-      g["status"]="running";g["seconds"]=0;g["seq"]=[n for n in range(1,76) if n not in set(g["called"])];random.shuffle(g["seq"]);g["last"]=now
-      async with engine.begin() as c:
-       await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":g["id"]})
-       await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":g["id"]})
-      logger.info("Game #%s started with %s players",g["id"],len({p.get("user_id") for p in g["players"].values()}))
-     elif elapsed>=30:
-      # No entrants: open another 30-second selection window instead of running an empty game.
-      g["lobby_started_at"]=now;g["seconds"]=30
-      async with engine.begin() as c:
-       await c.execute(text("UPDATE bingo_games SET lobby_started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":g["id"]})
-    elif g["status"]=="running" and now-g["last"]>=1.25:
-     if g["seq"]:
-      g["called"].append(g["seq"].pop(0));g["last"]=now
-      async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET called_numbers=CAST(:n AS jsonb) WHERE id=:i AND status='running'"),{"n":json.dumps(g["called"]),"i":g["id"]})
-     else:
-      g["status"]="finished";g["finished_at_ts"]=now
-      async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),called_numbers=CAST(:n AS jsonb) WHERE id=:i"),{"n":json.dumps(g["called"]),"i":g["id"]})
-    elif g["status"]=="finished" and now-(g.get("finished_at_ts") or now)>=5:
-     async with engine.begin() as c:
-      await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":g["id"]})
-      gid=(await c.execute(text("INSERT INTO bingo_games(status) VALUES('waiting') RETURNING id"))).scalar_one()
-     g.update(id=gid,status="waiting",seconds=30,called=[],players={},winner=None,seq=[],last=0,lobby_started_at=None,finished_at_ts=0)
-     logger.info("New lobby opened: game #%s",gid)
+       await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":game["id"]})
+       gid=(await c.execute(text("INSERT INTO bingo_games(status,stake_amount) VALUES('waiting',:s) RETURNING id"),{"s":stake})).scalar_one()
+      _games_by_stake[key]=_blank_game(gid,stake)
+      logger.info("New %s Birr lobby opened: game #%s",key,gid)
   except asyncio.CancelledError: raise
   except Exception: logger.exception("Game loop error")
 @asynccontextmanager
@@ -285,7 +329,9 @@ async def language(req:Request):
  if l not in ("en","am"):raise HTTPException(400,"Invalid language")
  await setlang(int(u["id"]),l);return {"ok":True}
 @app.get("/api/game")
-async def getgame(req:Request):
+async def getgame(req:Request,stake:Decimal=Decimal("10")):
+ if stake < 10 or stake > 1000: raise HTTPException(400,"Bet must be between 10 and 1000 Birr.")
+ await ensure_game_for_stake(stake); _current_stake.set(_stake_key(stake))
  u=await who(req);uid=int(u["id"])
  async with lock:
   # Keep this player's in-progress selections alive while their Mini App is open.
@@ -322,14 +368,21 @@ class Join(BaseModel):
  stake:Decimal=Field(ge=Decimal("10"),le=Decimal("1000"))
 class CartelaReservation(BaseModel):
  cartela_number:int=Field(ge=1,le=200)
+ stake:Decimal=Field(default=Decimal("10"),ge=Decimal("10"),le=Decimal("1000"))
 @app.post("/api/game/reserve")
 async def reserve_cartela(b:CartelaReservation,req:Request):
+ await ensure_game_for_stake(b.stake); _current_stake.set(_stake_key(b.stake))
  u=await who(req);uid=int(u["id"]);n=int(b.cartela_number)
  async with lock:
   if g["status"]!="waiting":raise HTTPException(409,"Lobby closed; wait for the next game.")
   if g["lobby_started_at"] is not None and time.time()-g["lobby_started_at"]>=30:raise HTTPException(409,"The 30-second lobby has closed. Please join the next game.")
   try:
    async with engine.begin() as c:
+    bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i FOR UPDATE"),{"i":uid})).scalar_one_or_none() or 0
+    pending=(await c.execute(text("SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE telegram_id=:i AND status='pending'"),{"i":uid})).scalar_one() or 0
+    available=Decimal(str(bal))-Decimal(str(pending))
+    if available < Decimal(str(b.stake)):
+     raise HTTPException(402,f"Deposit funds first. At least {b.stake} Birr available balance is required to select a cartela at this bet amount.")
     await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE expires_at<=NOW()"))
     used=(await c.execute(text("SELECT 1 FROM bingo_game_entries WHERE game_id=:g AND cartela_number=:n"),{"g":g["id"],"n":n})).first()
     if used:raise HTTPException(409,"That cartela is already taken.")
@@ -340,6 +393,7 @@ async def reserve_cartela(b:CartelaReservation,req:Request):
   return {"ok":True,"cartela_number":n,"expires_in":60}
 @app.post("/api/game/release")
 async def release_cartela(b:CartelaReservation,req:Request):
+ await ensure_game_for_stake(b.stake); _current_stake.set(_stake_key(b.stake))
  u=await who(req);uid=int(u["id"])
  async with lock:
   async with engine.begin() as c:
@@ -347,6 +401,7 @@ async def release_cartela(b:CartelaReservation,req:Request):
   return {"ok":True,"cartela_number":int(b.cartela_number)}
 @app.post("/api/game/join")
 async def join(b:Join,req:Request):
+ await ensure_game_for_stake(b.stake); _current_stake.set(_stake_key(b.stake))
  u=await who(req);uid=int(u["id"])
  nums=list(dict.fromkeys(b.cartela_numbers or ([b.cartela_number] if b.cartela_number else [])))
  if not nums: raise HTTPException(400,"Select at least one cartela.")
@@ -392,8 +447,12 @@ async def claim(req:Request):
  try:
   body=await req.json();number=int(body.get("cartela_number"));marked={int(x) for x in body.get("marked",[]) if str(x).isdigit()}
  except Exception:raise HTTPException(400,"Choose the cartela you want to claim with.")
+ async with engine.connect() as c:
+  matched=(await c.execute(text("SELECT ge.game_id,bg.stake_amount FROM bingo_game_entries ge JOIN bingo_games bg ON bg.id=ge.game_id WHERE ge.telegram_id=:u AND ge.cartela_number=:n AND bg.status='running' ORDER BY bg.id DESC LIMIT 1"),{"u":uid,"n":number})).first()
+ if not matched: raise HTTPException(409,"That cartela is not in a running game.")
+ await ensure_game_for_stake(matched[1]); _current_stake.set(_stake_key(matched[1]))
  async with lock:
-  if g["status"]!="running":raise HTTPException(409,"Game is not running.")
+  if g["id"]!=int(matched[0]) or g["status"]!="running":raise HTTPException(409,"That cartela's game is no longer running. Refresh the game.")
   p=g["players"].get(f"{uid}:{number}")
   if not p:raise HTTPException(400,"That cartela is not yours in this game.")
   line=winline(p["card"],g["called"])
@@ -864,6 +923,9 @@ async def leaderboard(req:Request):
  return {"players":[{"telegram_id":int(x[0]),"name":x[1],"wins":int(x[2])} for x in rows]}
 @app.websocket("/ws/game")
 async def ws(ws:WebSocket):
+ try: stake=Decimal(ws.query_params.get("stake","10"))
+ except Exception: stake=Decimal("10")
+ stake=min(Decimal("1000"),max(Decimal("10"),stake)); await ensure_game_for_stake(stake); _current_stake.set(_stake_key(stake))
  await ws.accept()
  try:
   while True:
