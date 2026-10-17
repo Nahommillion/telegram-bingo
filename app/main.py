@@ -255,7 +255,7 @@ async def loop():
        game["lobby_started_at"]=now
        async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET lobby_started_at=COALESCE(lobby_started_at,NOW()) WHERE id=:i AND status='waiting'"),{"i":game["id"]})
       elapsed=now-game["lobby_started_at"];game["seconds"]=max(0,math.ceil(30-elapsed))
-      if elapsed>=30 and game["players"]:
+      if elapsed>=30:
        game["status"]="running";game["seconds"]=0;game["seq"]=[n for n in range(1,76) if n not in set(game["called"])];random.shuffle(game["seq"]);game["last"]=now
        async with engine.begin() as c:
         await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
@@ -464,7 +464,7 @@ async def claim(req:Request):
   if g["winner"]:raise HTTPException(409,"Another player already won.")
   entries=list(g["players"].values());pot=sum((Decimal(str(x["stake"])) for x in entries),Decimal("0.00"))
   prize=(pot*Decimal("0.80")).quantize(Decimal("0.01"));commission=(pot-prize).quantize(Decimal("0.01"))
-  g["winner"]={"telegram_id":uid,"name":p["name"],"cartela_number":p["n"],"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"commission":float(commission)};g["status"]="finished";g["finished_at_ts"]=time.time()
+  g["winner"]={"telegram_id":uid,"name":p["name"],"cartela_number":p["n"],"cartela":p["card"],"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"commission":float(commission)};g["status"]="finished";g["finished_at_ts"]=time.time()
   async with engine.begin() as c:
    # Atomic conditional update prevents two simultaneous BINGO claims from
    # paying the same round twice, including across app workers/restarts.
