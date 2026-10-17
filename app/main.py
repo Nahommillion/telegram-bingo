@@ -201,14 +201,25 @@ async def loop():
   try:
    async with lock:
     now=time.time()
-    if g["status"]=="waiting" and g["players"]:
-     if g["lobby_started_at"] is None: g["lobby_started_at"]=now
-     g["seconds"]=max(0,math.ceil(30-(now-g["lobby_started_at"])))
-     if now-g["lobby_started_at"]>=30:
+    if g["status"]=="waiting":
+     # Keep the 30-second lobby clock cycling even when nobody has joined yet.
+     if g["lobby_started_at"] is None:
+      g["lobby_started_at"]=now
+      async with engine.begin() as c:
+       await c.execute(text("UPDATE bingo_games SET lobby_started_at=COALESCE(lobby_started_at,NOW()) WHERE id=:i AND status='waiting'"),{"i":g["id"]})
+     elapsed=now-g["lobby_started_at"]
+     g["seconds"]=max(0,math.ceil(30-elapsed))
+     if elapsed>=30 and g["players"]:
       g["status"]="running";g["seconds"]=0;g["seq"]=[n for n in range(1,76) if n not in set(g["called"])];random.shuffle(g["seq"]);g["last"]=now
-      async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":g["id"]})
-      async with engine.begin() as c: await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":g["id"]})
+      async with engine.begin() as c:
+       await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":g["id"]})
+       await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":g["id"]})
       logger.info("Game #%s started with %s players",g["id"],len({p.get("user_id") for p in g["players"].values()}))
+     elif elapsed>=30:
+      # No entrants: open another 30-second selection window instead of running an empty game.
+      g["lobby_started_at"]=now;g["seconds"]=30
+      async with engine.begin() as c:
+       await c.execute(text("UPDATE bingo_games SET lobby_started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":g["id"]})
     elif g["status"]=="running" and now-g["last"]>=1.25:
      if g["seq"]:
       g["called"].append(g["seq"].pop(0));g["last"]=now
