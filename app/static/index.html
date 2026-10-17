@@ -631,7 +631,8 @@ function playCallTone(number,preview=false){
    const letter=number<=15?'B':number<=30?'I':number<=45?'N':number<=60?'G':'O';
    const utter=new SpeechSynthesisUtterance(`${letter}, ${numberWords(number)}`);
    utter.lang='en-US';utter.rate=1.08;utter.pitch=1.02;utter.volume=1;
-   window.speechSynthesis.cancel();window.speechSynthesis.speak(utter);return;
+   // Do not cancel the speech queue: polling every second otherwise cuts off the call.
+   window.speechSynthesis.speak(utter);return;
   }catch(e){console.log('Spoken number unavailable',e);}
  }
  if(!tonePlayed&&number!=null)console.log('Browser audio is unavailable; spoken-number audio was attempted where supported.');
