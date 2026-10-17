@@ -627,7 +627,12 @@ function playCallTone(number,preview=false){
   }}
  }catch(e){console.log('Call tone unavailable',e);}
  if(!preview&&number!=null&&'speechSynthesis' in window&&typeof SpeechSynthesisUtterance!=='undefined'){
-  try{window.speechSynthesis.cancel();const utter=new SpeechSynthesisUtterance(callLabel(number).replace(/([BINGO])([0-9]+)/,'$1 $2'));utter.lang='en-US';utter.rate=0.9;utter.pitch=1.05;utter.volume=1;window.speechSynthesis.speak(utter);return;}catch(e){console.log('Spoken number unavailable',e);}
+  try{
+   const letter=number<=15?'B':number<=30?'I':number<=45?'N':number<=60?'G':'O';
+   const utter=new SpeechSynthesisUtterance(`${letter}, ${numberWords(number)}`);
+   utter.lang='en-US';utter.rate=1.08;utter.pitch=1.02;utter.volume=1;
+   window.speechSynthesis.cancel();window.speechSynthesis.speak(utter);return;
+  }catch(e){console.log('Spoken number unavailable',e);}
  }
  if(!tonePlayed&&number!=null)console.log('Browser audio is unavailable; spoken-number audio was attempted where supported.');
 }
@@ -763,9 +768,14 @@ async function joinGame(nums,stake){
  }catch(e){msg(e.message,true);await refreshGame().catch(()=>{});}
  finally{busy=false;if(G&&!(G.my_cartelas||[]).length)renderChoices();}
 }
+function numberWords(n){
+ const ones=['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen'];
+ const tens=['','','twenty','thirty','forty','fifty','sixty','seventy'];
+ n=Number(n);if(n<20)return ones[n]||String(n);return tens[Math.floor(n/10)]+(n%10?'-'+ones[n%10]:'');
+}
 function callLabel(n){
   n=Number(n);
-  return (n<=15?'B':n<=30?'I':n<=45?'N':n<=60?'G':'O')+n;
+  return (n<=15?'B':n<=30?'I':n<=45?'N':n<=60?'G':'O')+' '+n;
 }
 
 function renderCards(cards,called,wins=[]){
@@ -777,7 +787,7 @@ function renderCards(cards,called,wins=[]){
    const marked=v===0||marks.has(v),wasCalled=v===0||called.includes(v);
    return `<button type="button" class="cell ${marked?'marked':''} ${!wasCalled?'uncalled':''} ${winSet.has([r,c].join(','))?'win':''}" ${v===0||!called.includes(v)||G.status!=='running'?'disabled':''} onclick="toggleMark(${n},${v})" aria-label="Cartela ${n}, number ${v}">${v===0?'★':v}</button>`;
   })).join('');
-  return `<div class="my-card-item"><div class="card-caption"><b>${t('cartelaLabel')} #${n}</b><span class="muted">${t('cartelaBet')} ${money(entry.stake||0)}</span></div><div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div><div class="card">${cells}</div><button class="danger wide" style="padding:10px" onclick="claim(${n})" ${G.status!=='running'?'disabled':''}>${t('bingoClaim')} #${n}</button></div>`;
+  return `<div class="my-card-item"><div class="card-caption"><b>${t('cartelaLabel')} #${n}</b><span class="muted">${t('cartelaBet')} ${money(entry.stake||0)}</span></div><div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div><div class="card">${cells}</div></div>`;
  }).join('');
 }
 function toggleMark(cartela,n){
