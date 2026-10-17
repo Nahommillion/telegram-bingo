@@ -611,12 +611,8 @@ async function refreshGame(){
   document.getElementById('calledCount').textContent=G.called.length+'/75';
   document.getElementById('totalBets').textContent=money(G.total_bets||0);
   document.getElementById('prizeAmount').textContent=money(G.prize_amount||0);
-  const liveTaken=(G.players||[]).map(p=>({...p,confirmed:true}));
-  const liveNumbers=new Set(liveTaken.map(p=>Number(p.cartela_number)));
-  (G.reservations||[]).forEach(r=>{if(!liveNumbers.has(Number(r.cartela_number)))liveTaken.push({...r,stake:0,reserved:true});});
-  liveTaken.sort((a,b)=>a.cartela_number-b.cartela_number);
-  document.getElementById('takenCount').textContent=liveTaken.length+' '+t('takenSuffix');
-  document.getElementById('takenList').innerHTML=liveTaken.map(p=>`<span class="chip">#${p.cartela_number} · ${esc(p.name)}${p.reserved?' · reserved':(' · '+money(p.stake))}</span>`).join('')||'No cartelas taken yet.';
+  // The old Taken Cartelas panel was intentionally removed. Do not write to its
+  // deleted DOM nodes: that null assignment stopped cartela rendering and refreshes.
   const last=G.called.length?G.called[G.called.length-1]:null;
   if(G.called.length>lastSoundedCount){if(lastSoundedCount>0||G.status==='running')playCallTone(last);lastSoundedCount=G.called.length;}
   if(G.status==='waiting'&&G.called.length===0)lastSoundedCount=0;
