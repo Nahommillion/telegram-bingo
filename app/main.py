@@ -396,6 +396,17 @@ async def getgame(req:Request,stake:Decimal=Decimal("10")):
      card=x[3] if isinstance(x[3],list) else json.loads(x[3] or '[]')
      fresh[f"{int(x[0])}:{int(x[2])}"]={"user_id":int(x[0]),"name":x[1],"n":int(x[2]),"card":card,"stake":float(x[4] or 0)}
     g["players"]=fresh
+    # Restore the winner from persistent game entries whenever the API reloads state.
+    # This keeps the winning cartela visible even if the in-memory object was refreshed.
+    winner_uid=state[3]
+    if state[0]=="finished" and winner_uid is not None:
+     winning_player=next((p for p in fresh.values() if int(p["user_id"])==int(winner_uid) and p.get("card")),None)
+     if winning_player:
+      pattern=winline(winning_player["card"],g["called"])
+      pot=sum((Decimal(str(x["stake"])) for x in fresh.values()),Decimal("0.00"))
+      prize=(pot*Decimal("0.80")).quantize(Decimal("0.01"))
+      commission=(pot-prize).quantize(Decimal("0.01"))
+      g["winner"]={"telegram_id":int(winner_uid),"name":winning_player["name"],"cartela_number":winning_player["n"],"cartela":winning_player["card"],"pattern":pattern or [],"prize":float(prize),"total_bets":float(pot),"commission":float(commission)}
    rr=await c.execute(text("SELECT r.telegram_id,COALESCE(NULLIF(u.display_name,''),NULLIF(u.username,''),'Player'),r.cartela_number FROM bingo_cartela_reservations r LEFT JOIN bingo_users u ON u.telegram_id=r.telegram_id WHERE r.game_id=:g AND r.expires_at>NOW() ORDER BY r.cartela_number"),{"g":g["id"]})
    reservations=[{"telegram_id":int(x[0]),"name":x[1],"cartela_number":int(x[2])} for x in rr.fetchall()]
   if g["status"]=="waiting" and g["lobby_started_at"] is not None:
