@@ -119,7 +119,10 @@ def kb(l):
     one_time_keyboard=False,
     is_persistent=False
 )
-def wel(l):return ("🎉🎱 እንኳን ወደ Cartela Bingo በደህና መጡ!\n🇪🇹 የኢትዮጵያ ቀለሞች • ቢንጎ • ደስታ\n👇 ከታች ያለውን አዝራር ይምረጡ!" if l=="am" else "🎉🎱 Welcome to Cartela Bingo!\n🇪🇹 Ethiopian colors • Bingo • Fun\n👇 Choose an option below!")
+def wel(l):
+ return ("🎉🎱 እንኳን ወደ Goferehabesha Bingo በደህና መጡ!\n🇪🇹 ቢንጎ • ደስታ • የቀጥታ ጨዋታ\n👇 ከታች ያለውን አማራጭ ይምረጡ።" if l=="am" else "🎉🎱 Welcome to Goferehabesha Bingo!\n🇪🇹 Bingo • Fun • Live games\n👇 Choose an option below.")
+def registration_prompt(l):
+ return ("🎉🎱 እንኳን ወደ Goferehabesha Bingo በደህና መጡ!\n\n1️⃣ ከታች ያለውን 📱 ስልክ ቁጥር አጋራ ቁልፍ ይጫኑ።\n2️⃣ የራስዎን ስልክ ቁጥር ያረጋግጡ።\n3️⃣ ምዝገባው ከተጠናቀቀ በኋላ ገንዘብ ያስገቡና መጫወት ይጀምሩ! 🚀\n\n👇 ለመጀመር ስልክ ቁጥርዎን ያጋሩ።" if l=="am" else "🎉🎱 Welcome to Goferehabesha Bingo!\n\n1️⃣ Tap the 📱 Share my phone number button below.\n2️⃣ Confirm your own phone number.\n3️⃣ After registration, add funds and start playing! 🚀\n\n👇 Share your phone number to get started.")
 async def sendwel(up,l=None):
  l=l or await langof(up.effective_user.id); p=STATIC/"bingo.PNG"
  if p.exists():
@@ -127,26 +130,26 @@ async def sendwel(up,l=None):
   except Exception: logger.exception("Welcome image failed; sending text fallback")
  await up.effective_message.reply_text(wel(l),reply_markup=kb(l))
 async def request_contact(up):
- await up.effective_message.reply_text(
-  "📱 Welcome! Please share your own phone number to register and use Cartela Bingo. Tap the button below.",
-  reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📱 Share my phone number",request_contact=True)]],resize_keyboard=True,one_time_keyboard=True)
- )
+ l=await langof(up.effective_user.id)
+ label="📱 ስልክ ቁጥር አጋራ" if l=="am" else "📱 Share my phone number"
+ await up.effective_message.reply_text(registration_prompt(l),reply_markup=ReplyKeyboardMarkup([[KeyboardButton(label,request_contact=True)]],resize_keyboard=True,one_time_keyboard=True))
 async def contact(up,ctx):
  u=up.effective_user;m=up.effective_message;ct=m.contact
  await reg(u.id,u.username,u.first_name,"am" if (u.language_code or "").startswith("am") else "en")
  if not ct or ct.user_id != u.id:
-  await m.reply_text("For security, please share your own contact using the button below.")
+  await m.reply_text("ለደህንነት የራስዎን ስልክ ቁጥር ያጋሩ።" if await langof(u.id)=="am" else "For security, please share your own contact using the button below.")
   await request_contact(up);return
  phone=re.sub(r"[^0-9+]", "", ct.phone_number or "")
  if len(re.sub(r"\D","",phone))<9:
-  await m.reply_text("That phone number does not look valid. Please share your contact again.");await request_contact(up);return
+  await m.reply_text("የስልክ ቁጥሩ ትክክለኛ አይመስልም። እባክዎ እንደገና ያጋሩ።" if await langof(u.id)=="am" else "That phone number does not look valid. Please share your contact again.");await request_contact(up);return
  async with engine.begin() as c:
   other=(await c.execute(text("SELECT telegram_id FROM bingo_users WHERE RIGHT(COALESCE(phone_number,''),9)=RIGHT(:p,9) AND telegram_id<>:i LIMIT 1"),{"p":phone,"i":u.id})).scalar_one_or_none()
   if other:
-   await m.reply_text("That phone number is already registered to another Telegram account. Please contact support if this is a mistake.",reply_markup=kb(await langof(u.id)));return
+   await m.reply_text("ይህ ስልክ ቁጥር በሌላ Telegram መለያ ተመዝግቧል። ስህተት ከሆነ ድጋፍን ያነጋግሩ።" if await langof(u.id)=="am" else "That phone number is already registered to another Telegram account. Please contact support if this is a mistake.",reply_markup=kb(await langof(u.id)));return
   await c.execute(text("UPDATE bingo_users SET phone_number=:p,phone_verified=TRUE WHERE telegram_id=:i"),{"p":phone,"i":u.id})
- await m.reply_text("✅ Phone number registered successfully.",reply_markup=kb(await langof(u.id)))
- await sendwel(up)
+ l=await langof(u.id)
+ success=(f"🎉 እንኳን ወደ Goferehabesha Bingo ቤተሰብ በደህና መጡ!\n\n✅ ምዝገባዎ በተሳካ ሁኔታ ተጠናቋል።\n📱 ስልክ ቁጥር: {phone}\n\n🎯 አሁን መጫወት ለመጀመር ከታች ያለውን 🎮 አሁን ይጫወቱ ይጫኑ!\n🍀 መልካም ዕድል!" if l=="am" else f"🎉 Welcome to the Goferehabesha Bingo family!\n\n✅ Your registration is complete.\n📱 Phone number: {phone}\n\n🎯 Tap 🎮 Play Now below to start playing!\n🍀 Good luck!")
+ await m.reply_text(success,reply_markup=kb(l))
 async def start(up,ctx):
  logger.info("Received /start update")
  u=up.effective_user; await reg(u.id,u.username,u.first_name,"am" if (u.language_code or "").startswith("am") else "en")
@@ -194,8 +197,15 @@ async def bottext(up,ctx):
   await m.reply_text(f"💰 {b} Birr",reply_markup=kb(l))
  elif a=="deposit":await m.reply_text("Create a request in Wallet. Balance is credited only after a trusted payment record matches.",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💳 Open Wallet",web_app=WebAppInfo(url=WEB+"?tab=wallet"))]]))
  elif a=="support":await m.reply_text(SUPPORT or "Support contact not configured.",reply_markup=kb(l))
- elif a=="help":await m.reply_text("Choose a cartela, join the lobby, watch numbers marked automatically, then press BINGO. The server verifies the claim.",reply_markup=kb(l))
- elif a=="patterns":await m.reply_text("🏆 Horizontal, vertical, or diagonal line. Center is free.",reply_markup=kb(l))
+ elif a=="help":
+  help_en=("🎱 GOFEREHABESHA BINGO — HOW TO PLAY\n\n1️⃣ Register by sharing your own phone number with the bot.\n2️⃣ Open Wallet → Deposit and add funds using an available payment method. Wait for payment confirmation.\n3️⃣ Tap Play Now, choose your bet (minimum 10 Birr per cartela), then select one or more available cartelas and confirm.\n4️⃣ The lobby countdown is 30 seconds. A round starts only when at least 2 different players have joined. If fewer than 2 players join, the countdown restarts.\n5️⃣ When the game starts, cartela selection closes. Numbers are called aloud as B 20, I 37, N 42, G 58, O 71. Watch and mark the called numbers on your cartela.\n6️⃣ Complete a full horizontal line, vertical line, diagonal line, or all four corners to win. The server checks the called numbers and ends the round as soon as a valid winning pattern is completed.\n7️⃣ The winner receives 80% of total bets. The server checks the cartelas automatically, so you do not need to press BINGO.\n\n⚠️ Keep your Mini App open and enable called-number sound. If sound is blocked, tap Enable called-number sound once. Good luck!")
+  help_am=("🎱 GOFEREHABESHA BINGO — የጨዋታ መመሪያ\n\n1️⃣ ቦቱ ላይ የራስዎን ስልክ ቁጥር በማጋራት ይመዝገቡ።\n2️⃣ Wallet → Deposit በመግባት በሚገኝ የክፍያ ዘዴ ገንዘብ ያስገቡ፤ ክፍያው እስኪረጋገጥ ይጠብቁ።\n3️⃣ Play Now ይጫኑ፣ የውርርድ መጠንዎን (በእያንዳንዱ ካርቴላ ቢያንስ 10 ብር) ይምረጡ፣ ከዚያ ክፍት ካርቴላዎችን መርጠው ያረጋግጡ።\n4️⃣ የመጠባበቂያ ቆጠራው 30 ሰከንድ ነው። ጨዋታው የሚጀምረው ቢያንስ 2 የተለያዩ ተጫዋቾች ሲቀላቀሉ ብቻ ነው። ከ2 በታች ከሆኑ ቆጠራው እንደገና ይጀምራል።\n5️⃣ ጨዋታው ሲጀምር ካርቴላ መምረጥ ይዘጋል። ቁጥሮች በድምፅ B 20፣ I 37፣ N 42፣ G 58፣ O 71 ተብለው ይጠራሉ። በካርቴላዎ ላይ ያሉትን ይከታተሉና ምልክት ያድርጉ።\n6️⃣ አንድ ሙሉ የጎን መስመር፣ የቁልቁል መስመር፣ ዲያጎናል ወይም አራቱንም ጠርዞች ሲያገኙ ያሸንፋሉ። ትክክለኛ የማሸነፊያ ቅጥ ሲሟላ ጨዋታው ወዲያውኑ ይቆማል።\n7️⃣ አሸናፊው ከጠቅላላ ውርርድ 80% ያገኛል። ሰርቨሩ ካርቴላዎችን በራስ-ሰር ስለሚያረጋግጥ BINGO መጫን አያስፈልግም።\n\n⚠️ Mini App ክፍት ያድርጉና የቁጥር ድምፅን ያንቁ። ድምፁ ካልሰራ አንድ ጊዜ Enable called-number sound ይጫኑ። መልካም ዕድል!")
+  await m.reply_text(help_am if l=="am" else help_en,reply_markup=kb(l))
+ elif a=="patterns":
+  caption=("🏆 የማሸነፊያ ቅጦች፦ አግድም፣ ቁልቁል፣ ዲያጎናል ወይም አራቱም ጠርዞች። መካከለኛው ሳጥን ነፃ ነው።" if l=="am" else "🏆 Winning patterns: horizontal, vertical, either diagonal, or all four corners. The center square is free.")
+  pattern_image=STATIC/"bingo_patterns.png"
+  if pattern_image.exists(): await m.reply_photo(str(pattern_image),caption=caption,reply_markup=kb(l))
+  else: await m.reply_text(caption,reply_markup=kb(l))
  elif a=="rename":ctx.user_data["rename"]=True;await m.reply_text("Send your display name.")
  elif a=="invite":
   me=await ctx.bot.get_me();await m.reply_text(f"👥 Your personal invite link:\nhttps://t.me/{me.username}?start=ref_{u.id}",reply_markup=kb(l))
@@ -240,7 +250,12 @@ async def ensure_game_for_stake(stake):
  return state
 
 def winline(card,called):
- m=set(called)|{0};lines=[[(r,c) for c in range(5)] for r in range(5)]+[[(r,c) for r in range(5)] for c in range(5)]+[[(i,i) for i in range(5)],[(i,4-i) for i in range(5)]]
+ # Winning patterns: horizontal, vertical, either diagonal, or all four corners.
+ m=set(called)|{0}
+ lines=[[(r,c) for c in range(5)] for r in range(5)]
+ lines += [[(r,c) for r in range(5)] for c in range(5)]
+ lines += [[(i,i) for i in range(5)],[(i,4-i) for i in range(5)]]
+ lines += [[(0,0),(0,4),(4,0),(4,4)]]
  return next(([[r,c] for r,c in ln] for ln in lines if all(card[r][c] in m for r,c in ln)),None)
 async def loop():
  while True:
@@ -256,18 +271,48 @@ async def loop():
        async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET lobby_started_at=COALESCE(lobby_started_at,NOW()) WHERE id=:i AND status='waiting'"),{"i":game["id"]})
       elapsed=now-game["lobby_started_at"];game["seconds"]=max(0,math.ceil(30-elapsed))
       if elapsed>=30:
-       game["status"]="running";game["seconds"]=0;game["seq"]=[n for n in range(1,76) if n not in set(game["called"])];random.shuffle(game["seq"]);game["last"]=now
-       async with engine.begin() as c:
-        await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
-        await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":game["id"]})
-       logger.info("Bet %s Birr game #%s started with %s players",key,game["id"],len({p.get("user_id") for p in game["players"].values()}))
-      elif elapsed>=30:
-       game["lobby_started_at"]=now;game["seconds"]=30
-       async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET lobby_started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
-     elif game["status"]=="running" and now-game["last"]>=1.25:
+       unique_players={p.get("user_id") for p in game["players"].values()}
+       if len(unique_players)<2:
+        # Do not start a real-money round with fewer than two distinct players.
+        game["lobby_started_at"]=now;game["seconds"]=30
+        async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET lobby_started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
+       else:
+        game["status"]="running";game["seconds"]=0;game["seq"]=[n for n in range(1,76) if n not in set(game["called"])];random.shuffle(game["seq"]);game["last"]=now
+        async with engine.begin() as c:
+         await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
+         await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":game["id"]})
+        logger.info("Bet %s Birr game #%s started with %s players",key,game["id"],len(unique_players))
+     elif game["status"]=="running" and now-game["last"]>=1.5:
       if game["seq"]:
        game["called"].append(game["seq"].pop(0));game["last"]=now
-       async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET called_numbers=CAST(:n AS jsonb) WHERE id=:i AND status='running'"),{"n":json.dumps(game["called"]),"i":game["id"]})
+       # End immediately when a paid cartela completes a winning pattern.
+       candidates=[]
+       for player in game["players"].values():
+        pattern=winline(player["card"],game["called"])
+        if pattern:candidates.append((player,pattern))
+       if candidates:
+        player,pattern=random.choice(candidates)
+        pot=sum((Decimal(str(x["stake"])) for x in game["players"].values()),Decimal("0.00"))
+        prize=(pot*Decimal("0.80")).quantize(Decimal("0.01"));commission=(pot-prize).quantize(Decimal("0.01"))
+        async with engine.begin() as c:
+         won=(await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),winner_telegram_id=:u,called_numbers=CAST(:n AS jsonb) WHERE id=:g AND status='running' AND winner_telegram_id IS NULL RETURNING id"),{"u":player["user_id"],"n":json.dumps(game["called"]),"g":game["id"]})).scalar_one_or_none()
+         if won is not None:
+          if prize:
+           txid=(await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'win',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{"u":player["user_id"],"a":prize,"d":f"Bingo prize (80% of {pot} Birr total bets)","r":f"bingo:game:{game['id']}:winner"})).scalar_one_or_none()
+           if txid is not None: await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":prize,"u":player["user_id"]})
+          if commission and OWNER_ID.isdigit():
+           owner=int(OWNER_ID)
+           await c.execute(text("INSERT INTO bingo_users(telegram_id,display_name) VALUES(:i,'Platform Owner') ON CONFLICT(telegram_id) DO NOTHING"),{"i":owner})
+           await c.execute(text("INSERT INTO bingo_wallets(telegram_id) VALUES(:i) ON CONFLICT DO NOTHING"),{"i":owner})
+           await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:i"),{"a":commission,"i":owner})
+           await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:i,'platform_commission',:a,'verified',:d)"),{"i":owner,"a":commission,"d":f"20% platform commission from game #{game['id']}"})
+          elif commission:
+           await c.execute(text("UPDATE bingo_platform_wallet SET balance=balance+:a WHERE id=1"),{"a":commission})
+          game["winner"]={"telegram_id":player["user_id"],"name":player["name"],"cartela_number":player["n"],"cartela":player["card"],"pattern":pattern,"prize":float(prize),"total_bets":float(pot),"commission":float(commission)}
+          game["status"]="finished";game["finished_at_ts"]=now
+          logger.info("Game #%s ended automatically: %s won with cartela %s",game["id"],player["name"],player["n"])
+       else:
+        async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET called_numbers=CAST(:n AS jsonb) WHERE id=:i AND status='running'"),{"n":json.dumps(game["called"]),"i":game["id"]})
       else:
        game["status"]="finished";game["finished_at_ts"]=now
        async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),called_numbers=CAST(:n AS jsonb) WHERE id=:i"),{"n":json.dumps(game["called"]),"i":game["id"]})
