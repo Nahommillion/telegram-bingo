@@ -9,6 +9,9 @@
 <style>
 :root{--bg:#071525;--panel:#102b40;--panel2:#173b50;--green:#12c879;--yellow:#ffd447;--red:#ef4055;--gold:#f8c947;--muted:#a8bfce;--white:#f7fbff}
 *{box-sizing:border-box}
+.emoji,.nav span,.ball,.float-bg span,button{font-family:system-ui,Arial,"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
+.emoji,.nav span{filter:saturate(1.25);text-shadow:0 1px 3px #0006}
+button .emoji{display:inline-block}
 body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 60%);font-family:system-ui,Arial;color:var(--white);padding-bottom:82px}
 .float-bg{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0;opacity:.17}.float-bg span{position:absolute;font-size:28px;animation:drift 16s linear infinite}.float-bg span:nth-child(1){left:4%;top:18%}.float-bg span:nth-child(2){left:82%;top:12%;animation-delay:-4s}.float-bg span:nth-child(3){left:90%;top:55%;animation-delay:-8s}.float-bg span:nth-child(4){left:13%;top:72%;animation-delay:-12s}.float-bg span:nth-child(5){left:65%;top:86%;animation-delay:-6s}.float-bg span:nth-child(6){left:48%;top:34%;animation-delay:-10s}@keyframes drift{0%{transform:translateY(10vh) rotate(0deg)}50%{transform:translateY(-7vh) rotate(180deg)}100%{transform:translateY(10vh) rotate(360deg)}}.wrap,.bottom,.flag{position:relative;z-index:1}.flag{height:5px;background:linear-gradient(90deg,#078844 0 33.3%,#ffd447 33.3% 66.6%,#ed3346 66.6%)}
 .wrap{max-width:560px;margin:auto;padding:14px}
@@ -133,6 +136,13 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 .wallet-howto li{margin:7px 0}
 .wallet-howto p{margin:10px 0 0;color:#ffd6a3}
 #fundingNotice .secondary{margin-top:8px;width:100%}
+.wallet-howto summary,.collapsible summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:10px;font-weight:900;color:#ffd447;padding:2px}
+.wallet-howto summary::-webkit-details-marker,.collapsible summary::-webkit-details-marker{display:none}
+.wallet-howto[open] summary,.collapsible[open] summary{padding-bottom:10px;border-bottom:1px solid #31576b}
+.collapsible #deposits{padding-top:8px}
+.winner-card{max-width:270px;margin:12px auto;padding:9px;background:#102b40;border:1px solid #ffd447;border-radius:13px}
+.winner-card h4{margin:0 0 8px;color:#ffd447;text-align:center}
+.winner-card .cell{pointer-events:none}
 @media(max-width:380px){.compact-stats .stat{padding:6px 3px}.compact-stats .stat span{font-size:8px}.compact-stats .stat strong{font-size:11px}}
 
 </style>
@@ -204,14 +214,14 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 </div>
 <div id="playing" class="hidden">
  <div class="title"><h3 id="yourCard">Your Cartela</h3><span class="pill" id="cardNum"></span></div>
- <div class="panel"><div class="chips recent-called" id="recent"></div><div id="myCards"></div><div id="claimMsg" class="notice hidden"></div></div>
+ <div class="panel"><div class="chips recent-called" id="recent"></div><div id="myCards"></div><div id="claimMsg" class="notice hidden"></div><div id="winnerCartela" class="hidden"></div></div>
 </div>
 </section>
 
 <section class="screen" id="wallet">
  <div class="title"><h3 id="walletTitle">💳 Wallet</h3></div>
- <div class="panel"><div class="muted small" id="currentBalLabel">AVAILABLE BALANCE</div><h2 id="walletBal">0.00 Birr</h2><div class="notice" id="autoNote">Deposits are credited automatically only after Check.et confirms the payment. Withdrawals may still require processing. Never send money to an unverified recipient.</div></div>
- <div class="panel wallet-howto" id="walletHowTo"><h3>💰ዋሌት እንዴት ይሞላል?</h3><ul><li><b>የተዘረዘሩትን የባንክ መለያዎች አካውንት ኮፒ ያርጉ።</b></li><li><b>ወደ ተመረጠው የባንክ መለያ አካውንት ገንዘብ ያስተላልፉ።</b></li><li><b>የተላለፈውን ገንዘብ የሚያረጋግጥ SMS ኮፒ ያድርጉ።</b></li><li><b>ባንክና መጠን መርጠው SMS ይላኩ።</b></li></ul><p><b>ማሳሰቢያ:ከአንድ ባንክ ወደ ሌላ ባንክ (Other Bank) የተከለከለ ነው ጥያቄዎን ለማስተናገድ እንደማንችል ከወዲሁ እናሳውቃለን!</b></p></div>
+ <div class="panel"><div class="muted small" id="currentBalLabel">AVAILABLE BALANCE</div><h2 id="walletBal">0.00 Birr</h2><div class="notice" id="autoNote">✅ Deposits are credited automatically after payment confirmation. ⏳ Withdrawals may still require processing. 🛡️ Never send money to an unverified recipient.</div></div>
+ <details class="panel wallet-howto" id="walletHowTo"><summary id="walletHowToTitle">💰 How to top up your wallet</summary><div id="walletHowToContent"></div></details>
  <div class="wallet-actions">
   <button class="wallet-tab active" data-wallet-tab="deposit" onclick="walletTab('deposit')" id="walletDepositTab">➕ Deposit</button>
   <button class="wallet-tab" data-wallet-tab="withdraw" onclick="walletTab('withdraw')" id="walletWithdrawTab">⬆️ Withdraw</button>
@@ -234,13 +244,13 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
   <div id="payerPhoneWrap" class="hidden">
    <label class="small muted" data-en="CBE Birr payer phone number" data-am="የCBE Birr ከፋይ ስልክ ቁጥር">CBE Birr payer phone number</label>
    <input class="field" id="payerPhone" type="tel" placeholder="Phone number used to send the payment" data-placeholder-en="Phone number used to send the payment" data-placeholder-am="ክፍያውን ለመላክ የተጠቀሙበት ስልክ ቁጥር">
-   <p class="muted small" data-en="Enter the phone number that made this CBE Birr payment. Check.et requires it to verify CBE Birr receipts." data-am="ይህን የCBE Birr ክፍያ የፈጸመውን ስልክ ቁጥር ያስገቡ። Check.et ደረሰኙን ለማረጋገጥ ይህን ይፈልጋል።">Enter the phone number that made this CBE Birr payment. Check.et requires it to verify CBE Birr receipts.</p>
+   <p class="muted small" data-en="Enter the phone number that made this CBE Birr payment. It is used to verify the receipt." data-am="ይህን የCBE Birr ክፍያ የፈጸመውን ስልክ ቁጥር ያስገቡ። ይህ ቁጥር ደረሰኙን ለማረጋገጥ ይጠቅማል።">Enter the phone number that made this CBE Birr payment. It is used to verify the receipt.</p>
   </div>
   <label class="small muted" id="amountDepositedLabel">Amount you deposited (Birr)</label><input class="field" id="amount" type="number" min="1" step="0.01" placeholder="Enter the exact amount, e.g. 100" data-placeholder-en="Enter the exact amount, e.g. 100" data-placeholder-am="ትክክለኛውን መጠን ያስገቡ፣ ለምሳሌ 100">
   <label class="small muted" id="receiptLabel">Paste the official receipt link or complete payment SMS</label><textarea class="field sms-box" id="paymentMessage" rows="5" placeholder="Paste the official receipt link, or the full payment confirmation SMS" data-placeholder-en="Paste the official receipt link, or the full payment confirmation SMS" data-placeholder-am="የኦፊሴላዊ ደረሰኝ ሊንክ ወይም ሙሉ የክፍያ ማረጋገጫ SMS ያስገቡ"></textarea>
   <label class="small muted" id="referenceLabel">Transaction/reference code (optional if included in the link or SMS)</label><input class="field" id="reference" placeholder="Optional if the receipt link or SMS contains a reference" data-placeholder-en="Optional if the receipt link or SMS contains a reference" data-placeholder-am="በደረሰኝ ሊንክ ወይም SMS ውስጥ ካለ አማራጭ ነው">
   <button class="primary" onclick="deposit()" id="submitDeposit">Verify receipt & submit deposit</button>
-  <p class="muted small" id="depositHelp">Check.et verifies supported receipts. Confirmed deposits are credited to your wallet automatically; no operator approval is required. eBirr cannot be auto-credited until a compatible verification API is configured.</p>
+  <p class="muted small" id="depositHelp">Payment verification checks supported receipts. Confirmed deposits are credited to your wallet automatically; no operator approval is required. eBirr may require a separate supported verification integration.</p>
  </div>
  <div class="panel wallet-pane" id="withdrawPane">
   <h3 id="withdrawTitle">⬆️ Withdraw money</h3>
@@ -262,7 +272,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
   <button class="primary" onclick="transfer()" data-en="Review and transfer" data-am="ይመርምሩና ያስተላልፉ">Review and transfer</button>
   <p class="muted small" data-en="Check the recipient and amount carefully. Transfers to other registered players are immediate and cannot be automatically reversed." data-am="ተቀባዩንና መጠኑን በጥንቃቄ ያረጋግጡ። ለተመዘገቡ ተጫዋቾች የሚላክ ገንዘብ ወዲያውኑ ይደርሳል፣ በራስ-ሰር መመለስም አይቻልም።">Check the recipient and amount carefully. Transfers to other registered players are immediate and cannot be automatically reversed.</p>
  </div>
- <div class="title"><h3 id="depositRequestsTitle">Deposit Requests</h3></div><div class="panel" id="deposits"></div>
+ <details class="panel collapsible" id="depositRequestsDetails"><summary><span id="depositRequestsTitle">📥 Deposit Requests</span><span id="depositRequestCount" class="pill">0 ⌄</span></summary><div id="deposits"></div></details>
  <div class="title"><h3 id="withdrawRequestsTitle">Withdrawal Requests</h3></div><div class="panel" id="withdrawals"></div>
  <div class="title"><h3 id="txTitle">📜 Transaction History</h3></div><div class="panel" id="transactions"></div>
  </section>
@@ -341,8 +351,8 @@ const strings = {
     startsLabel:'STARTS IN',gamePlayersLabel:'PLAYERS',calledStatLabel:'CALLED',totalBetsLabel:'TOTAL BETS',prizeLabel:'WINNER GETS',availableCartelasTitle:'🟢 Available Cartelas',takenTitle:'👥 Taken Cartelas — Live',cartelaHelp:'Tap green cartelas to select them. Dim black cartelas are already taken. Your selections are reserved instantly while you prepare your bet.',selectedLabel:'Selected cartela',findCartela:'Find cartela number (1–200)',startGameBtn:'🎮 Start Game',noCartelasTaken:'No cartelas taken yet.',waitingFirstNumber:'Waiting for first number',soundEnable:'🔇 Enable called-number sound',soundOn:'🔊 Called-number sound ON',availableSuffix:'available',takenSuffix:'taken',
     wins:'wins',cartelaBet:'Bet',cartelaLabel:'Cartela',bingoClaim:'🏆 BINGO! — Cartela',joinedCartelas:'cartela(s) reserved. Total bet:',copiedValue:'Copied:',copyFailed:'Copy failed. Please copy manually:',
     withdrawAmountLabel:'Amount to withdraw (Birr)',withdrawMethodLabel:'Choose withdrawal method',phoneNumber:'Phone number',cbeAccountNumber:'CBE account number',enterPhone:'Enter phone number',enterCbeAccount:'Enter CBE account number',playerPhoneNumber:'Player phone number',telegramUsername:'Telegram username',enterRegisteredPhone:'Enter registered phone number',enterUsername:'Enter @username',enterAmountDestination:'Enter an amount and destination details.',withdrawConfirm:'Submit withdrawal of',checkYour:'Check your',recipientAmountError:'Enter a recipient and transfer amount.',transferConfirm:'Transfer',toPlayerFoundBy:'to the player found by',transferred:'Transferred',toText:'to',
-    mpesaNotice:'Send only to one of these configured M-Pesa receiving numbers, then paste the official payment confirmation below.',mpesaReceiverLabel:'M-Pesa receiving number',mpesaMissing:'M-Pesa receiving numbers are not configured on the server. Set MPESA_RECEIVER_NUMBERS in Render before accepting M-Pesa deposits.',cbeBirrNotice:'Send your CBE Birr deposit to one of these phone numbers, reusing the Telebirr receiving numbers as requested. Enter your own payer phone number below so Check.et can verify the receipt.',cbeBirrReceiver:'CBE Birr receiving phone',ebirrReceivingPhone:'eBirr receiving phone',phoneRecipient:'Phone recipient',cbeAccount:'CBE account',
-    payerPhoneLabel:'CBE Birr payer phone number',payerPhoneHelp:'Enter the phone number that made this CBE Birr payment. Check.et requires it to verify CBE Birr receipts.',walletDepositTab:'➕ Deposit',walletWithdrawTab:'⬆️ Withdraw',walletTransferTab:'↔️ Transfer',paymentMethodLabel:'Choose payment method',amountDepositedLabel:'Amount you deposited (Birr)',receiptLabel:'Paste the official receipt link or complete payment SMS',referenceLabel:'Transaction/reference code (optional if included in the link or SMS)',depositRequestsTitle:'Deposit Requests',withdrawRequestsTitle:'Withdrawal Requests',withdrawTitle:'⬆️ Withdraw money',transferTitle:'↔️ Transfer to a player',
+    mpesaNotice:'Send only to one of these configured M-Pesa receiving numbers, then paste the official payment confirmation below.',mpesaReceiverLabel:'M-Pesa receiving number',mpesaMissing:'M-Pesa receiving numbers are not configured on the server. Set MPESA_RECEIVER_NUMBERS in Render before accepting M-Pesa deposits.',cbeBirrNotice:'Send your CBE Birr deposit to one of these phone numbers, reusing the Telebirr receiving numbers as requested. Enter your own payer phone number below for receipt verification.',cbeBirrReceiver:'CBE Birr receiving phone',ebirrReceivingPhone:'eBirr receiving phone',phoneRecipient:'Phone recipient',cbeAccount:'CBE account',
+    payerPhoneLabel:'CBE Birr payer phone number',payerPhoneHelp:'Enter the phone number that made this CBE Birr payment. It is used to verify the receipt.',walletDepositTab:'➕ Deposit',walletWithdrawTab:'⬆️ Withdraw',walletTransferTab:'↔️ Transfer',paymentMethodLabel:'Choose payment method',amountDepositedLabel:'Amount you deposited (Birr)',receiptLabel:'Paste the official receipt link or complete payment SMS',referenceLabel:'Transaction/reference code (optional if included in the link or SMS)',depositRequestsTitle:'📥 Deposit Requests',withdrawRequestsTitle:'Withdrawal Requests',withdrawTitle:'⬆️ Withdraw money',transferTitle:'↔️ Transfer to a player',
     hero:'🎉 Welcome to Goferehabesha Cartela Bingo!',
     tagline:'Choose a cartela. Follow the numbers. Claim your win! 🎱',
     balLabel:'YOUR BALANCE',playersLabel:'PLAYERS',profileBalLabel:'AVAILABLE BALANCE',
@@ -351,14 +361,14 @@ const strings = {
     leaderTile:'Leaderboard',profileTile:'My Profile',
     liveTitle:'🎱 Live Game',lobbyHint:'Choose a cartela to join the next game.',
     openLobby:'Open Game Lobby →',gameTitle:'🎮 Game Lobby',
-    chooseDesc:'Choose your cartela and join the next game.',
+    chooseDesc:'Choose your cartela and join the next game.',fundingNoticeText:'💰 Please deposit funds and wait for payment verification. Your available wallet balance must cover at least one cartela at your selected bet amount.',
     lastLabel:'Last number called',chooseCard:'Choose Your Cartela (1–200)',
     stakeLabel:'Bet per cartela (minimum 10 Birr)',yourCard:'Your Cartela',
     calledTitle:'📣 Called Numbers',bingo:'🏆 BINGO!',
     walletTitle:'💳 Wallet & Deposits',currentBalLabel:'CURRENT BALANCE',
-    autoNote:'Deposits are credited automatically only after Check.et confirms the payment. Withdrawals may still require processing. Never send money to an unverified recipient.',
+    autoNote:'✅ Deposits are credited automatically after payment confirmation. ⏳ Withdrawals may still require processing. 🛡️ Never send money to an unverified recipient.',
     depositReq:'➕ Create Deposit Request',submitDeposit:'Verify Receipt & Submit',
-    depositHelp:'Check.et verifies supported receipt links or payment text. Wallet credit requires a confirmed transaction, exact amount, ETB currency, and completed payment status. eBirr needs a separate supported verification integration.',
+    depositHelp:'Supported receipt links or payment text are verified. Wallet credit requires a confirmed transaction, exact amount, ETB currency, and completed payment status. eBirr may require a separate supported verification integration.',
     txTitle:'📜 Transaction History',leaderTitle:'🏆 Leaderboard',
     inviteTitle:'👥 Invite Friends',
     inviteText:'Friends must open your link and press Start to register.',
@@ -372,16 +382,16 @@ const strings = {
     joinok:'Cartela reserved. Game starts when the lobby timer ends.',
     claimok:'BINGO VERIFIED! Winning cells are highlighted.',
     empty:'None yet.',copied:'Referral link copied.',
-    request:'Deposit submitted. If Check.et confirms it, your wallet is credited automatically; no operator approval is required.',
-    ebirrReceiverNote:'Use the listed receiving phone numbers only if the account is enabled to receive eBirr payments.',ebirrVerifyNote:'Important: the current server cannot verify eBirr automatically through Check.et. eBirr deposits will not be credited until a supported official verification integration confirms the payment.',copy:'Copy',reservedStarts:'Cartelas reserved. Game starts in',seconds:'seconds',liveInstructions:'LIVE — watch the called number and mark it on each cartela.',roundFinished:'Round finished.',wonWithCartela:'won with Cartela',prizeWord:'prize',noWinnerRound:'All 75 numbers were called. No valid BINGO. Next round is opening…',noCartelaMatch:'No cartela matches that number.',cartela:'Cartela',cartelaPlural:'cartela(s)',totalBet:'total bet',minimum:'minimum',perCartela:'per cartela',none:'None',selectOneOrMore:'Select one or more cartelas. Minimum bet is 10 Birr per cartela.',selectAtLeastOne:'Please select at least one available cartela.',minimumBetError:'Minimum bet is 10 Birr per cartela.'
+    request:'Deposit submitted. Your wallet is credited automatically after the payment is confirmed; no operator approval is required.',
+    ebirrReceiverNote:'Use the listed receiving phone numbers only if the account is enabled to receive eBirr payments.',ebirrVerifyNote:'Important: the current server cannot verify eBirr automatically. eBirr deposits will not be credited until a supported official verification integration confirms the payment.',copy:'Copy',reservedStarts:'Cartelas reserved. Game starts in',seconds:'seconds',liveInstructions:'LIVE — watch the called number and mark it on each cartela.',roundFinished:'Round finished.',wonWithCartela:'won with Cartela',prizeWord:'prize',noWinnerRound:'🎯 Round finished. No valid BINGO was claimed. No winning cartela this round. The next countdown is opening…',noBetsRound:'🚫 No one placed a bet in this round. No winner cartela. The next countdown is opening…',noCartelaMatch:'No cartela matches that number.',cartela:'Cartela',cartelaPlural:'cartela(s)',totalBet:'total bet',minimum:'minimum',perCartela:'per cartela',none:'None',selectOneOrMore:'Select one or more cartelas. Minimum bet is 10 Birr per cartela.',selectAtLeastOne:'Please select at least one available cartela.',minimumBetError:'Minimum bet is 10 Birr per cartela.'
   },
   am: {
     brandName:'ጎፈሬሀበሻ ካርቴላ ቢንጎ',brandSubtitle:'🇪🇹 የኢትዮጵያ ቢንጎ • ቢንጎ',homeGameLabel:'ጨዋታ',depositTileHint:'ቴሌብር • CBE • ኢብር',walletTileHint:'ሂሳብና ታሪክ',leaderTileHint:'ከፍተኛ ተጫዋቾች',profileTileHint:'ቋንቋና ግብዣ',homeTimerLabel:'ጨዋታው የሚጀምረው በ',homePlayersLabel:'ተጫዋቾች',homeCalledLabel:'የተጠሩ',
     startsLabel:'የሚጀምረው በ',gamePlayersLabel:'ተጫዋቾች',calledStatLabel:'የተጠሩ',totalBetsLabel:'ጠቅላላ ውርርድ',prizeLabel:'አሸናፊው የሚያገኘው',availableCartelasTitle:'🟢 ያሉ ካርቴላዎች',takenTitle:'👥 የተያዙ ካርቴላዎች — በቀጥታ',cartelaHelp:'አረንጓዴ ካርቴላዎችን ይንኩ። ደብዛዛ ጥቁር ካርቴላዎች ተይዘዋል። የመረጡት ካርቴላ ወዲያውኑ ይያዛል።',selectedLabel:'የተመረጠ ካርቴላ',findCartela:'የካርቴላ ቁጥር ፈልግ (1–200)',startGameBtn:'🎮 ጨዋታ ጀምር',noCartelasTaken:'ገና የተያዘ ካርቴላ የለም።',waitingFirstNumber:'የመጀመሪያውን ቁጥር በመጠባበቅ ላይ',soundEnable:'🔇 የተጠሩ ቁጥሮችን ድምፅ አንቃ',soundOn:'🔊 የቁጥር ድምፅ በርቷል',availableSuffix:'ክፍት',takenSuffix:'ተይዟል',
     wins:'ድል',cartelaBet:'ውርርድ',cartelaLabel:'ካርቴላ',bingoClaim:'🏆 ቢንጎ! — ካርቴላ',joinedCartelas:'ካርቴላ ተይዟል። ጠቅላላ ውርርድ፦',copiedValue:'ተቀድቷል፦',copyFailed:'መቅዳት አልተቻለም። በእጅ ይቅዱ፦',
     withdrawAmountLabel:'የሚያወጡት መጠን (ብር)',withdrawMethodLabel:'የማውጫ ዘዴ ይምረጡ',phoneNumber:'ስልክ ቁጥር',cbeAccountNumber:'የCBE ሂሳብ ቁጥር',enterPhone:'ስልክ ቁጥር ያስገቡ',enterCbeAccount:'የCBE ሂሳብ ቁጥር ያስገቡ',playerPhoneNumber:'የተጫዋች ስልክ ቁጥር',telegramUsername:'የTelegram የተጠቃሚ ስም',enterRegisteredPhone:'የተመዘገበ ስልክ ቁጥር ያስገቡ',enterUsername:'@username ያስገቡ',enterAmountDestination:'መጠኑንና የተቀባይ መረጃውን ያስገቡ።',withdrawConfirm:'የሚያወጡትን ገንዘብ ያረጋግጡ፦',checkYour:'ይህን ያረጋግጡ፦',recipientAmountError:'ተቀባዩንና የማስተላለፊያ መጠኑን ያስገቡ።',transferConfirm:'ያስተላልፉ',toPlayerFoundBy:'በዚህ መንገድ ለተገኘው ተጫዋች',transferred:'ተላልፏል',toText:'ለ',
-    mpesaNotice:'ከተዋቀሩት የM-Pesa ተቀባይ ቁጥሮች ወደ አንዱ ብቻ ይላኩ፣ ከዚያ የክፍያ ማረጋገጫውን ከታች ያስገቡ።',mpesaReceiverLabel:'የM-Pesa ተቀባይ ቁጥር',mpesaMissing:'የM-Pesa ተቀባይ ቁጥሮች በሰርቨሩ ላይ አልተዋቀሩም። በRender ላይ MPESA_RECEIVER_NUMBERS ያዘጋጁ።',cbeBirrNotice:'እንደተጠየቀው ከTelebirr ተቀባይ ቁጥሮች አንዱን በመጠቀም የCBE Birr ክፍያዎን ይላኩ። Check.et ደረሰኙን እንዲያረጋግጥ የከፋይዎን ስልክ ቁጥር ከታች ያስገቡ።',cbeBirrReceiver:'የCBE Birr ተቀባይ ስልክ',ebirrReceivingPhone:'የኢብር ተቀባይ ስልክ',phoneRecipient:'ስልክ ተቀባይ',cbeAccount:'የCBE ሂሳብ',
-    payerPhoneLabel:'የCBE Birr ከፋይ ስልክ ቁጥር',payerPhoneHelp:'ይህን የCBE Birr ክፍያ የፈጸመውን ስልክ ቁጥር ያስገቡ። Check.et ደረሰኙን ለማረጋገጥ ይህን ይፈልጋል።',walletDepositTab:'➕ ገንዘብ አስገባ',walletWithdrawTab:'⬆️ ገንዘብ አውጣ',walletTransferTab:'↔️ አስተላልፍ',paymentMethodLabel:'የክፍያ ዘዴ ይምረጡ',amountDepositedLabel:'ያስገቡት መጠን (ብር)',receiptLabel:'የክፍያ ደረሰኝ ሊንክ ወይም ሙሉ SMS ያስገቡ',referenceLabel:'የግብይት ማጣቀሻ ቁጥር (ከሊንክ/SMS ውስጥ ካለ አማራጭ)',depositRequestsTitle:'የተቀማጭ ጥያቄዎች',withdrawRequestsTitle:'የማውጣት ጥያቄዎች',withdrawTitle:'⬆️ ገንዘብ ማውጣት',transferTitle:'↔️ ለተጫዋች ገንዘብ ማስተላለፍ',
+    mpesaNotice:'ከተዋቀሩት የM-Pesa ተቀባይ ቁጥሮች ወደ አንዱ ብቻ ይላኩ፣ ከዚያ የክፍያ ማረጋገጫውን ከታች ያስገቡ።',mpesaReceiverLabel:'የM-Pesa ተቀባይ ቁጥር',mpesaMissing:'የM-Pesa ተቀባይ ቁጥሮች በሰርቨሩ ላይ አልተዋቀሩም። በRender ላይ MPESA_RECEIVER_NUMBERS ያዘጋጁ።',cbeBirrNotice:'እንደተጠየቀው ከTelebirr ተቀባይ ቁጥሮች አንዱን በመጠቀም የCBE Birr ክፍያዎን ይላኩ። ደረሰኙ እንዲረጋገጥ የከፋይዎን ስልክ ቁጥር ከታች ያስገቡ።',cbeBirrReceiver:'የCBE Birr ተቀባይ ስልክ',ebirrReceivingPhone:'የኢብር ተቀባይ ስልክ',phoneRecipient:'ስልክ ተቀባይ',cbeAccount:'የCBE ሂሳብ',
+    payerPhoneLabel:'የCBE Birr ከፋይ ስልክ ቁጥር',payerPhoneHelp:'ይህን የCBE Birr ክፍያ የፈጸመውን ስልክ ቁጥር ያስገቡ። ይህ ቁጥር ደረሰኙን ለማረጋገጥ ይጠቅማል።',walletDepositTab:'➕ ገንዘብ አስገባ',walletWithdrawTab:'⬆️ ገንዘብ አውጣ',walletTransferTab:'↔️ አስተላልፍ',paymentMethodLabel:'የክፍያ ዘዴ ይምረጡ',amountDepositedLabel:'ያስገቡት መጠን (ብር)',receiptLabel:'የክፍያ ደረሰኝ ሊንክ ወይም ሙሉ SMS ያስገቡ',referenceLabel:'የግብይት ማጣቀሻ ቁጥር (ከሊንክ/SMS ውስጥ ካለ አማራጭ)',depositRequestsTitle:'📥 የተቀማጭ ጥያቄዎች',withdrawRequestsTitle:'የማውጣት ጥያቄዎች',withdrawTitle:'⬆️ ገንዘብ ማውጣት',transferTitle:'↔️ ለተጫዋች ገንዘብ ማስተላለፍ',
     hero:'🎉 ወደ ጎፈሬሀበሻ ካርቴላ ቢንጎ እንኳን በደህና መጡ!',
     tagline:'ካርቴላ ይምረጡ። ቁጥሮችን ይከታተሉ። ያሸንፉ! 🎱',
     balLabel:'ቀሪ ሂሳብዎ',playersLabel:'ተጫዋቾች',profileBalLabel:'ያለው ቀሪ ሂሳብ',
@@ -392,7 +402,7 @@ const strings = {
     lobbyHint:'ቀጣዩን ጨዋታ ለመቀላቀል ካርቴላ ይምረጡ።',
     openLobby:'የጨዋታ ክፍል ይክፈቱ →',
     gameTitle:'🎮 የጨዋታ ክፍል',
-    chooseDesc:'ካርቴላዎን ይምረጡና ይቀላቀሉ።',
+    chooseDesc:'ካርቴላዎን ይምረጡና ይቀላቀሉ።',fundingNoticeText:'💰 እባክዎ ዋሌትዎን ይሙሉና የክፍያ ማረጋገጫውን ይጠብቁ። ያለዎት ቀሪ ሂሳብ ቢያንስ ለአንድ ካርቴላ በመረጡት ውርርድ መጠን በቂ መሆን አለበት።',
     lastLabel:'የመጨረሻ የተጠራ ቁጥር',
     chooseCard:'ካርቴላዎን ይምረጡ (1–200)',
     stakeLabel:'ለእያንዳንዱ ካርቴላ ውርርድ (ቢያንስ 10 ብር)',
@@ -400,10 +410,10 @@ const strings = {
     calledTitle:'📣 የተጠሩ ቁጥሮች',bingo:'🏆 ቢንጎ!',
     walletTitle:'💳 ሂሳብና ተቀማጭ',
     currentBalLabel:'የአሁኑ ሂሳብ',
-    autoNote:'የክፍያ ደረሰኝ ሊንክ ወይም SMS ከታች ያስገቡ። Check.et ያረጋግጣል፤ መጠኑና ተቀባዩ ከተረጋገጡ ብቻ ሂሳብ ይጨምራል።',
+    autoNote:'✅ ክፍያው ከተረጋገጠ በኋላ ገንዘብ ወዲያውኑ ወደ ዋሌትዎ ይጨመራል። ⏳ የገንዘብ ማውጣት ጥያቄዎች ሂደት ሊፈልጉ ይችላሉ። 🛡️ ያልተረጋገጠ ተቀባይ ገንዘብ አይላኩ።',
     depositReq:'➕ የተቀማጭ ጥያቄ ይፍጠሩ',
     submitDeposit:'ደረሰኝ አረጋግጥና ላክ',
-    depositHelp:'Check.et የክፍያ ሊንክ ወይም ጽሑፍ ያረጋግጣል። የተረጋገጠው መጠንና ተቀባይ ሂሳብ ከተዛመዱ ብቻ ቀሪ ሂሳብ ይጨምራል። eBirr በአሁኑ ጊዜ በAPI አይደገፍም።',
+    depositHelp:'የክፍያ ማረጋገጫ ስርዓት የክፍያ ሊንክ ወይም ጽሑፍ ያረጋግጣል። የተረጋገጠ ግብይት፣ ትክክለኛ መጠን፣ የETB ገንዘብ አይነትና የተጠናቀቀ ክፍያ ሁኔታ ሲኖር ብቻ ዋሌት ይጨመራል። eBirr የተለየ የማረጋገጫ ውህደት ሊፈልግ ይችላል።',
     txTitle:'📜 የግብይት ታሪክ',
     leaderTitle:'🏆 ደረጃ ሰንጠረዥ',
     inviteTitle:'👥 ጓደኞችን ይጋብዙ',
@@ -421,7 +431,7 @@ const strings = {
     claimok:'ቢንጎ ተረጋግጧል! አሸናፊ ህዋሶች ተደምቀዋል።',
     empty:'ገና የለም።',copied:'ሊንኩ ተቀድቷል።',
     request:'የተቀማጭ ጥያቄ ተልኳል። የተፈቀደ መዝገብ እስኪዛመድ ይጠብቃል።',
-    ebirrReceiverNote:'የተዘረዘሩትን ስልክ ቁጥሮች መጠቀም ያለብዎት መለያው ኢብር ክፍያ መቀበል ከቻለ ብቻ ነው።',ebirrVerifyNote:'አስፈላጊ፦ አሁን ያለው ሰርቨር ኢብርን በCheck.et በራስ-ሰር ማረጋገጥ አይችልም። የተደገፈ የኦፊሴላዊ ማረጋገጫ ውህደት ክፍያውን እስኪያረጋግጥ ድረስ የኢብር ተቀማጭ ገንዘብ አይጨመርም።',copy:'ቅዳ',reservedStarts:'ካርቴላዎች ተይዘዋል። ጨዋታው የሚጀምረው በ',seconds:'ሰከንድ ውስጥ ነው',liveInstructions:'በቀጥታ — የተጠሩትን ቁጥሮች ይከታተሉና በካርቴላዎ ላይ ምልክት ያድርጉ።',roundFinished:'ዙሩ ተጠናቋል።',wonWithCartela:'በካርቴላ ያሸነፈው',prizeWord:'ሽልማት',noWinnerRound:'75ቱም ቁጥሮች ተጠርተዋል። ቢንጎ አልተረጋገጠም። ቀጣዩ ዙር እየተከፈተ ነው…',noCartelaMatch:'ከዚህ ቁጥር ጋር የሚዛመድ ካርቴላ የለም።',cartela:'ካርቴላ',cartelaPlural:'ካርቴላ',totalBet:'ጠቅላላ ውርርድ',minimum:'ቢያንስ',perCartela:'ለእያንዳንዱ ካርቴላ',none:'የለም',selectOneOrMore:'አንድ ወይም ከዚያ በላይ ካርቴላዎችን ይምረጡ። ለእያንዳንዱ ካርቴላ ዝቅተኛው ውርርድ 10 ብር ነው።',selectAtLeastOne:'ቢያንስ አንድ ክፍት ካርቴላ ይምረጡ።',minimumBetError:'ለእያንዳንዱ ካርቴላ ዝቅተኛው ውርርድ 10 ብር ነው.'
+    ebirrReceiverNote:'የተዘረዘሩትን ስልክ ቁጥሮች መጠቀም ያለብዎት መለያው ኢብር ክፍያ መቀበል ከቻለ ብቻ ነው።',ebirrVerifyNote:'አስፈላጊ፦ አሁን ያለው ሰርቨር የኢብር ክፍያን በራስ-ሰር ማረጋገጥ አይችልም። የተደገፈ የኦፊሴላዊ ማረጋገጫ ውህደት ክፍያውን እስኪያረጋግጥ ድረስ የኢብር ተቀማጭ ገንዘብ አይጨመርም።',copy:'ቅዳ',reservedStarts:'ካርቴላዎች ተይዘዋል። ጨዋታው የሚጀምረው በ',seconds:'ሰከንድ ውስጥ ነው',liveInstructions:'በቀጥታ — የተጠሩትን ቁጥሮች ይከታተሉና በካርቴላዎ ላይ ምልክት ያድርጉ።',roundFinished:'ዙሩ ተጠናቋል።',wonWithCartela:'በካርቴላ ያሸነፈው',prizeWord:'ሽልማት',noWinnerRound:'🎯 ዙሩ ተጠናቋል። ትክክለኛ ቢንጎ አልተገኘም። በዚህ ዙር አሸናፊ ካርቴላ የለም። ቀጣዩ ቆጠራ እየተጀመረ ነው…',noBetsRound:'🚫 በዚህ ዙር ማንም ውርርድ አልገባም። አሸናፊ ካርቴላ የለም። ቀጣዩ ቆጠራ እየተጀመረ ነው…',noCartelaMatch:'ከዚህ ቁጥር ጋር የሚዛመድ ካርቴላ የለም።',cartela:'ካርቴላ',cartelaPlural:'ካርቴላ',totalBet:'ጠቅላላ ውርርድ',minimum:'ቢያንስ',perCartela:'ለእያንዳንዱ ካርቴላ',none:'የለም',selectOneOrMore:'አንድ ወይም ከዚያ በላይ ካርቴላዎችን ይምረጡ። ለእያንዳንዱ ካርቴላ ዝቅተኛው ውርርድ 10 ብር ነው።',selectAtLeastOne:'ቢያንስ አንድ ክፍት ካርቴላ ይምረጡ።',minimumBetError:'ለእያንዳንዱ ካርቴላ ዝቅተኛው ውርርድ 10 ብር ነው.'
   }
 };
 
@@ -520,6 +530,11 @@ function applyLang(){
   document.querySelectorAll('#transferMethod option[data-en][data-am]').forEach(el=>{el.textContent=L==='am'?el.dataset.am:el.dataset.en;});
   document.getElementById('langBtn').textContent=L==='en'?'አማ / EN':'EN / አማ';
   document.documentElement.lang=L==='am'?'am':'en';
+  const howTo=document.getElementById('walletHowToContent');
+  if(howTo)howTo.innerHTML=L==='am'?'<ul><li><b>🏦 የተዘረዘሩትን የባንክ ሂሳቦች ቁጥር ይቅዱ።</b></li><li><b>💸 ወደ መረጡት የባንክ ሂሳብ ገንዘብ ያስተላልፉ።</b></li><li><b>📩 ክፍያውን የሚያረጋግጠውን SMS ይቅዱ።</b></li><li><b>🏷️ ባንኩንና መጠኑን በመምረጥ SMS-ውን ያስገቡ።</b></li></ul><p><b>⚠️ ማሳሰቢያ፦ ከአንድ ባንክ ወደ ሌላ ባንክ (Other Bank) የሚደረግ ዝውውር አይፈቀድም። በዚህ ምክንያት ጥያቄዎን ማስተናገድ እንደማንችል ከወዲሁ እናሳውቃለን።</b></p>':'<ul><li><b>🏦 Copy one of the listed bank account numbers.</b></li><li><b>💸 Transfer the money to the bank account you selected.</b></li><li><b>📩 Copy the SMS confirming the transfer.</b></li><li><b>🏷️ Select the bank and amount, then submit the SMS.</b></li></ul><p><b>⚠️ Important: Transfers from one bank to another bank (Other Bank) are not accepted. We may be unable to process your request if you use this transfer type.</b></p>';
+  const howTitle=document.getElementById('walletHowToTitle');if(howTitle)howTitle.textContent=L==='am'?'💰 ዋሌት እንዴት ይሞላል?':'💰 How to top up your wallet';
+  const funding=document.getElementById('fundingNotice');if(funding){const b=funding.querySelector('button');funding.textContent=t('fundingNoticeText')+' ';if(b){b.textContent=L==='am'?'👛 ዋሌት ክፈት':'👛 Open Wallet';funding.appendChild(b);}}
+  const dr=document.getElementById('depositRequestsTitle');if(dr)dr.textContent=t('depositRequestsTitle');
   const stake=document.getElementById('stake');
   if(stake){stake.min='10';if(Number(stake.value)<10)stake.value='10';currentLobbyStake=Number(stake.value)||10;}
   const search=document.getElementById('cartelaSearch');if(search)search.placeholder=t('findCartela');
@@ -659,11 +674,14 @@ async function refreshGame(){
     document.getElementById('selectArea').classList.add('hidden');
     document.getElementById('playing').classList.add('hidden');
   }
+  const winnerHost=document.getElementById('winnerCartela');
   if(G.winner){
-    document.getElementById('claimMsg').textContent=t('bingo')+' '+G.winner.name+' '+t('wonWithCartela')+' #'+G.winner.cartela_number+' — '+t('prizeWord')+' '+money(G.winner.prize||0)+'.';
+    document.getElementById('claimMsg').textContent='🏆 '+G.winner.name+' '+t('wonWithCartela')+' #'+G.winner.cartela_number+' — '+t('prizeWord')+' '+money(G.winner.prize||0)+'.';
     document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
-  }else if(G.status==='running')document.getElementById('claimMsg').classList.add('hidden');
-  if(G.status==='finished'&&!G.winner){document.getElementById('claimMsg').textContent=t('noWinnerRound');document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');}
+    if(winnerHost&&Array.isArray(G.winner.cartela)){const marked=new Set((G.winner.pattern||[]).map(x=>x.join(',')));winnerHost.classList.remove('hidden');winnerHost.innerHTML='<div class="winner-card"><h4>🏆 '+(L==='am'?'አሸናፊ ካርቴላ':'Winning Cartela')+' #'+G.winner.cartela_number+'</h4><div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div><div class="card">'+G.winner.cartela.flatMap((row,r)=>row.map((v,c)=>'<div class="cell '+(marked.has([r,c].join(','))?'win':'')+'">'+(v===0?'★':v)+'</div>')).join('')+'</div></div>';}
+  }else if(G.status==='running') {document.getElementById('claimMsg').classList.add('hidden');if(winnerHost)winnerHost.classList.add('hidden');}
+  if(G.status==='finished'&&!G.winner){document.getElementById('claimMsg').textContent=(Number(G.total_bets||0)===0?t('noBetsRound'):t('noWinnerRound'));document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');if(winnerHost)winnerHost.classList.add('hidden');}
+  if(G.status==='waiting'&&!G.winner&&winnerHost)winnerHost.classList.add('hidden');
 }
 function cartelasTakenByOthers(){
  const mine=Number(me?.id||0);const taken=new Set((G?.players||[]).map(p=>Number(p.cartela_number)));
@@ -790,6 +808,7 @@ async function refreshWallet(){
     document.getElementById('deposits').innerHTML=w.deposits.map(d=>
       `<div class="row"><span>${esc(d.provider)}<br><small class="muted">${esc(d.reference)} · ${esc(d.status)}</small></span><b>${money(d.amount)}</b></div>`
     ).join('')||t('empty');
+    const depositCount=document.getElementById('depositRequestCount');if(depositCount)depositCount.textContent=String(w.deposits.length)+' ⌄';
     document.getElementById('withdrawals').innerHTML=(w.withdrawals||[]).map(x=>
       `<div class="row"><span>${esc(x.provider)} · ${esc(x.destination)}<br><small class="muted">#${x.id} · ${esc(x.status)}</small></span><b>${money(x.amount)}</b></div>`
     ).join('')||t('empty');
@@ -836,7 +855,7 @@ async function deposit(){
    depositStatus((result.message||'Bank verification is temporarily unavailable.')+' Checking again automatically; keep this screen open.');
    await new Promise(resolve=>setTimeout(resolve,12000));
   }
-  depositStatus('Check.et or the bank is still unavailable. Your deposit remains pending and has not been credited. Keep this screen open and press Verify receipt & submit deposit to retry.',true);
+  depositStatus('The payment verification service or bank is still unavailable. Your deposit remains pending and has not been credited. Keep this screen open and press Verify receipt & submit deposit to retry.',true);
  }catch(e){msg(e.message,true);}
  finally{depositBusy=false;button.disabled=false;button.textContent=originalLabel;}
 }
