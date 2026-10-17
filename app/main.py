@@ -54,6 +54,8 @@ async def dbinit():
  "CREATE TABLE IF NOT EXISTS bingo_game_players(game_id BIGINT,telegram_id BIGINT,cartela_number INT,cartela JSONB,stake NUMERIC(14,2) DEFAULT 0,PRIMARY KEY(game_id,telegram_id),UNIQUE(game_id,cartela_number))",
  "ALTER TABLE bingo_games ADD COLUMN IF NOT EXISTS lobby_started_at TIMESTAMPTZ",
  "CREATE TABLE IF NOT EXISTS bingo_game_entries(game_id BIGINT NOT NULL,telegram_id BIGINT NOT NULL,cartela_number INT NOT NULL,cartela JSONB NOT NULL,stake NUMERIC(14,2) NOT NULL DEFAULT 10,created_at TIMESTAMPTZ DEFAULT NOW(),PRIMARY KEY(game_id,cartela_number),UNIQUE(game_id,telegram_id,cartela_number))",
+ "CREATE TABLE IF NOT EXISTS bingo_cartela_reservations(game_id BIGINT NOT NULL,cartela_number INT NOT NULL,telegram_id BIGINT NOT NULL,expires_at TIMESTAMPTZ NOT NULL,PRIMARY KEY(game_id,cartela_number))",
+ "CREATE INDEX IF NOT EXISTS ix_bingo_cartela_reservations_expiry ON bingo_cartela_reservations(expires_at)",
  "CREATE TABLE IF NOT EXISTS bingo_platform_wallet(id INT PRIMARY KEY DEFAULT 1 CHECK(id=1),balance NUMERIC(14,2) NOT NULL DEFAULT 0,updated_at TIMESTAMPTZ DEFAULT NOW())",
  "INSERT INTO bingo_platform_wallet(id,balance) VALUES(1,0) ON CONFLICT(id) DO NOTHING",
  "INSERT INTO bingo_game_entries(game_id,telegram_id,cartela_number,cartela,stake) SELECT game_id,telegram_id,cartela_number,cartela,stake FROM bingo_game_players WHERE TRUE ON CONFLICT(game_id,cartela_number) DO NOTHING"
@@ -205,6 +207,7 @@ async def loop():
      if now-g["lobby_started_at"]>=30:
       g["status"]="running";g["seconds"]=0;g["seq"]=[n for n in range(1,76) if n not in set(g["called"])];random.shuffle(g["seq"]);g["last"]=now
       async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":g["id"]})
+      async with engine.begin() as c: await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":g["id"]})
       logger.info("Game #%s started with %s players",g["id"],len({p.get("user_id") for p in g["players"].values()}))
     elif g["status"]=="running" and now-g["last"]>=1.25:
      if g["seq"]:
@@ -214,7 +217,9 @@ async def loop():
       g["status"]="finished";g["finished_at_ts"]=now
       async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),called_numbers=CAST(:n AS jsonb) WHERE id=:i"),{"n":json.dumps(g["called"]),"i":g["id"]})
     elif g["status"]=="finished" and now-(g.get("finished_at_ts") or now)>=5:
-     async with engine.begin() as c: gid=(await c.execute(text("INSERT INTO bingo_games(status) VALUES('waiting') RETURNING id"))).scalar_one()
+     async with engine.begin() as c:
+      await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":g["id"]})
+      gid=(await c.execute(text("INSERT INTO bingo_games(status) VALUES('waiting') RETURNING id"))).scalar_one()
      g.update(id=gid,status="waiting",seconds=30,called=[],players={},winner=None,seq=[],last=0,lobby_started_at=None,finished_at_ts=0)
      logger.info("New lobby opened: game #%s",gid)
   except asyncio.CancelledError: raise
@@ -272,8 +277,11 @@ async def language(req:Request):
 async def getgame(req:Request):
  u=await who(req);uid=int(u["id"])
  async with lock:
-  # PostgreSQL is the shared source of truth for cartela reservations. Refresh on
-  # every poll so all players see reservations made by other users immediately.
+  # Keep this player's in-progress selections alive while their Mini App is open.
+  async with engine.begin() as c:
+   await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE expires_at<=NOW()"))
+   if g["status"]=="waiting":
+    await c.execute(text("UPDATE bingo_cartela_reservations SET expires_at=NOW()+INTERVAL '60 seconds' WHERE game_id=:g AND telegram_id=:u AND expires_at>NOW()"),{"g":g["id"],"u":uid})
   async with engine.connect() as c:
    state=(await c.execute(text("SELECT status,called_numbers,lobby_started_at,winner_telegram_id FROM bingo_games WHERE id=:g"),{"g":g["id"]})).first()
    if state:
@@ -286,6 +294,8 @@ async def getgame(req:Request):
      card=x[3] if isinstance(x[3],list) else json.loads(x[3] or '[]')
      fresh[f"{int(x[0])}:{int(x[2])}"]={"user_id":int(x[0]),"name":x[1],"n":int(x[2]),"card":card,"stake":float(x[4] or 0)}
     g["players"]=fresh
+   rr=await c.execute(text("SELECT r.telegram_id,COALESCE(NULLIF(u.display_name,''),NULLIF(u.username,''),'Player'),r.cartela_number FROM bingo_cartela_reservations r LEFT JOIN bingo_users u ON u.telegram_id=r.telegram_id WHERE r.game_id=:g AND r.expires_at>NOW() ORDER BY r.cartela_number"),{"g":g["id"]})
+   reservations=[{"telegram_id":int(x[0]),"name":x[1],"cartela_number":int(x[2])} for x in rr.fetchall()]
   if g["status"]=="waiting" and g["lobby_started_at"] is not None:
    g["seconds"]=max(0,math.ceil(30-(time.time()-g["lobby_started_at"])))
   entries=list(g["players"].values())
@@ -293,11 +303,37 @@ async def getgame(req:Request):
   users={p.get("user_id") for p in entries}
   total_bets=sum((Decimal(str(p["stake"])) for p in entries),Decimal("0.00"))
   prize=(total_bets*Decimal("0.80")).quantize(Decimal("0.01"))
-  return {"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"players":[{"telegram_id":p.get("user_id"),"name":p["name"],"cartela_number":p["n"],"stake":p["stake"]} for p in entries],"player_count":len(users),"total_bets":float(total_bets),"prize_amount":float(prize),"owner_share":float((total_bets-prize).quantize(Decimal("0.01"))),"my_cartelas":mine,"my_cartela":mine[0]["cartela"] if mine else None,"my_cartela_number":mine[0]["cartela_number"] if mine else None,"winner":g["winner"]}
+  return {"id":g["id"],"status":g["status"],"lobby_seconds":g["seconds"],"called":g["called"],"players":[{"telegram_id":p.get("user_id"),"name":p["name"],"cartela_number":p["n"],"stake":p["stake"]} for p in entries],"reservations":reservations,"player_count":len(users),"total_bets":float(total_bets),"prize_amount":float(prize),"owner_share":float((total_bets-prize).quantize(Decimal("0.01"))),"my_cartelas":mine,"my_cartela":mine[0]["cartela"] if mine else None,"my_cartela_number":mine[0]["cartela_number"] if mine else None,"winner":g["winner"]}
+
 class Join(BaseModel):
  cartela_numbers:list[int]=Field(default_factory=list)
  cartela_number:Optional[int]=Field(default=None,ge=1,le=200)
  stake:Decimal=Field(ge=Decimal("10"),le=Decimal("1000"))
+class CartelaReservation(BaseModel):
+ cartela_number:int=Field(ge=1,le=200)
+@app.post("/api/game/reserve")
+async def reserve_cartela(b:CartelaReservation,req:Request):
+ u=await who(req);uid=int(u["id"]);n=int(b.cartela_number)
+ async with lock:
+  if g["status"]!="waiting":raise HTTPException(409,"Lobby closed; wait for the next game.")
+  if g["lobby_started_at"] is not None and time.time()-g["lobby_started_at"]>=30:raise HTTPException(409,"The 30-second lobby has closed. Please join the next game.")
+  try:
+   async with engine.begin() as c:
+    await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE expires_at<=NOW()"))
+    used=(await c.execute(text("SELECT 1 FROM bingo_game_entries WHERE game_id=:g AND cartela_number=:n"),{"g":g["id"],"n":n})).first()
+    if used:raise HTTPException(409,"That cartela is already taken.")
+    row=(await c.execute(text("INSERT INTO bingo_cartela_reservations(game_id,cartela_number,telegram_id,expires_at) VALUES(:g,:n,:u,NOW()+INTERVAL '60 seconds') ON CONFLICT(game_id,cartela_number) DO UPDATE SET telegram_id=EXCLUDED.telegram_id,expires_at=EXCLUDED.expires_at WHERE bingo_cartela_reservations.expires_at<=NOW() OR bingo_cartela_reservations.telegram_id=EXCLUDED.telegram_id RETURNING cartela_number"),{"g":g["id"],"n":n,"u":uid})).first()
+    if not row:raise HTTPException(409,"That cartela was just selected by another player. Choose a green number.")
+  except IntegrityError:
+   raise HTTPException(409,"That cartela was just selected by another player. Choose a green number.")
+  return {"ok":True,"cartela_number":n,"expires_in":60}
+@app.post("/api/game/release")
+async def release_cartela(b:CartelaReservation,req:Request):
+ u=await who(req);uid=int(u["id"])
+ async with lock:
+  async with engine.begin() as c:
+   await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g AND cartela_number=:n AND telegram_id=:u"),{"g":g["id"],"n":int(b.cartela_number),"u":uid})
+  return {"ok":True,"cartela_number":int(b.cartela_number)}
 @app.post("/api/game/join")
 async def join(b:Join,req:Request):
  u=await who(req);uid=int(u["id"])
@@ -321,6 +357,8 @@ async def join(b:Join,req:Request):
     for ix,n in enumerate(nums):params[f"n{ix}"]=n;placeholders.append(f":n{ix}")
     taken=(await c.execute(text("SELECT cartela_number FROM bingo_game_entries WHERE game_id=:g AND cartela_number IN ("+",".join(placeholders)+")"),params)).scalars().all()
     if taken: raise HTTPException(409,"Cartela(s) just taken: "+", ".join(map(str,taken))+". Refresh and choose available numbers.")
+    reserved=(await c.execute(text("SELECT cartela_number FROM bingo_cartela_reservations WHERE game_id=:g AND cartela_number IN ("+",".join(placeholders)+") AND expires_at>NOW() AND telegram_id<>:i"),{**params,"i":uid})).scalars().all()
+    if reserved: raise HTTPException(409,"Cartela(s) just taken: "+", ".join(map(str,reserved))+". Refresh and choose available numbers.")
     bal=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i FOR UPDATE"),{"i":uid})).scalar_one_or_none() or 0
     pending=(await c.execute(text("SELECT COALESCE(SUM(amount),0) FROM withdrawal_requests WHERE telegram_id=:i AND status='pending'"),{"i":uid})).scalar_one() or 0
     available=Decimal(str(bal))-Decimal(str(pending))
@@ -330,6 +368,7 @@ async def join(b:Join,req:Request):
     for n,card in cards.items():
      await c.execute(text("INSERT INTO bingo_game_entries(game_id,telegram_id,cartela_number,cartela,stake) VALUES(:g,:i,:n,CAST(:c AS jsonb),:s)"),{"g":g["id"],"i":uid,"n":n,"c":json.dumps(card),"s":b.stake})
     await c.execute(text("UPDATE bingo_games SET lobby_started_at=COALESCE(lobby_started_at,NOW()) WHERE id=:g"),{"g":g["id"]})
+    await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g AND telegram_id=:i AND cartela_number IN ("+",".join(placeholders)+")"),{**params,"i":uid})
   except IntegrityError:
    raise HTTPException(409,"A selected cartela was just taken. Refresh and choose again.")
   for n,card in cards.items():g["players"][f"{uid}:{n}"]={"user_id":uid,"name":u.get("first_name","Player"),"n":n,"card":card,"stake":float(b.stake)}
