@@ -23,6 +23,7 @@
 #profileTitle::before{content:"👤";background:linear-gradient(135deg,#d6b8ff,#8b78ff)}
 #settings::before{content:"⚙️";background:linear-gradient(135deg,#cbd5e1,#64748b)}
 #walletTitle::before{content:"💳";background:linear-gradient(135deg,#8bf7ff,#388cff)}
+#leaderTitle::before{content:"🏆";display:inline-grid;place-items:center;flex:0 0 34px;width:34px;height:32px;border-radius:10px;background:linear-gradient(135deg,#fff17b,#ffb12e 48%,#18d98a);box-shadow:0 3px 10px #0005;color:#071525;font-size:21px;line-height:1;text-shadow:none}
 button .emoji{display:inline-block}
 body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 60%);font-family:system-ui,Arial;color:var(--white);padding-bottom:82px}
 .float-bg{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0;opacity:.17}.float-bg span{position:absolute;font-size:28px;animation:drift 16s linear infinite}.float-bg span:nth-child(1){left:4%;top:18%}.float-bg span:nth-child(2){left:82%;top:12%;animation-delay:-4s}.float-bg span:nth-child(3){left:90%;top:55%;animation-delay:-8s}.float-bg span:nth-child(4){left:13%;top:72%;animation-delay:-12s}.float-bg span:nth-child(5){left:65%;top:86%;animation-delay:-6s}.float-bg span:nth-child(6){left:48%;top:34%;animation-delay:-10s}@keyframes drift{0%{transform:translateY(10vh) rotate(0deg)}50%{transform:translateY(-7vh) rotate(180deg)}100%{transform:translateY(10vh) rotate(360deg)}}.wrap,.bottom,.flag{position:relative;z-index:1}.flag{height:5px;background:linear-gradient(90deg,#078844 0 33.3%,#ffd447 33.3% 66.6%,#ed3346 66.6%)}
@@ -381,7 +382,7 @@ const strings = {
     autoNote:'✅ Deposits are credited automatically after payment confirmation. ⏳ Withdrawals may still require processing. 🛡️ Never send money to an unverified recipient.',
     depositReq:'➕ Create Deposit Request',submitDeposit:'🧾 Verify Receipt & Submit',
     depositHelp:'Supported receipt links or payment text are verified. Wallet credit requires a confirmed transaction, exact amount, ETB currency, and completed payment status. eBirr may require a separate supported verification integration.',
-    txTitle:'📜 Transaction History',leaderTitle:'🏆 Leaderboard',
+    txTitle:'📜 Transaction History',leaderTitle:'Leaderboard',
     inviteTitle:'👥 Invite Friends',
     inviteText:'Friends must open your link and press Start to register.',
     copyBtn:'Copy Referral Link',profileTitle:'Player Profile',
@@ -427,7 +428,7 @@ const strings = {
     submitDeposit:'🧾 ደረሰኝ አረጋግጥና ላክ',
     depositHelp:'የክፍያ ማረጋገጫ ስርዓት የክፍያ ሊንክ ወይም ጽሑፍ ያረጋግጣል። የተረጋገጠ ግብይት፣ ትክክለኛ መጠን፣ የETB ገንዘብ አይነትና የተጠናቀቀ ክፍያ ሁኔታ ሲኖር ብቻ ዋሌት ይጨመራል። eBirr የተለየ የማረጋገጫ ውህደት ሊፈልግ ይችላል።',
     txTitle:'📜 የግብይት ታሪክ',
-    leaderTitle:'🏆 ደረጃ ሰንጠረዥ',
+    leaderTitle:'ደረጃ ሰንጠረዥ',
     inviteTitle:'👥 ጓደኞችን ይጋብዙ',
     inviteText:'ጓደኞች ሊንኩን ከፍተው Start መጫን አለባቸው።',
     copyBtn:'የግብዣ ሊንክ ቅዳ',
@@ -657,8 +658,9 @@ async function playCallTone(number,preview=false){
    const letter=number<=15?'B':number<=30?'I':number<=45?'N':number<=60?'G':'O';
    const utter=new SpeechSynthesisUtterance(`${letter}, ${numberWords(number)}`);
    utter.lang='en-US';utter.rate=1.0;utter.pitch=1.0;utter.volume=1;
-   // Prevent a slow mobile voice queue from speaking stale calls out of order.
-   // Keep speech calls in order so mobile voices finish each number.
+   // Drop stale/priming speech so this called number starts now instead of
+   // waiting behind an old utterance on mobile browsers and Telegram WebViews.
+   window.speechSynthesis.cancel();
    window.speechSynthesis.speak(utter);speechPrimed=true;
   }catch(e){console.log('Spoken number unavailable:',e);}
  }
@@ -689,9 +691,9 @@ async function refreshGame(){
   document.getElementById('lastLabel').textContent=last===null?t('waitingFirstNumber'):callLabel(last);
   document.getElementById('allCalled').innerHTML=G.called.slice().reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('')||t('empty');
   document.getElementById('recent').innerHTML=G.called.slice(-8).reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('');
-  // Speak the exact latest number visible in the large number display, after its DOM text is updated.
-  // If a slow phone misses a poll, skip stale calls rather than speaking a number that is no longer displayed.
-  if(hasNewCall){if(G.status==='running'&&last!==null)window.setTimeout(()=>playCallTone(last),40);lastSoundedCount=G.called.length;}
+  // Trigger audio in this same refresh, immediately after updating the visible
+  // number, so there is no extra timer delay between the number and its sound.
+  if(hasNewCall){if(G.status==='running'&&last!==null)playCallTone(last);lastSoundedCount=G.called.length;}
   const ownReservations=(G.reservations||[]).filter(r=>Number(r.telegram_id)===Number(me?.id)).map(r=>Number(r.cartela_number));
   for(const n of ownReservations)selectedCartelas.add(n);
   for(const n of [...selectedCartelas])if(!ownReservations.includes(Number(n))&&!pendingCartelas.has(Number(n)))selectedCartelas.delete(n);
