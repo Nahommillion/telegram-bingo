@@ -292,7 +292,7 @@ async def loop():
         await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
         await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":game["id"]})
        logger.info("Bet %s Birr game #%s started at countdown zero with %s distinct players",key,game["id"],len(unique_players))
-     elif game["status"]=="running" and now-game["last"]>=1.25:
+     elif game["status"]=="running" and now-game["last"]>=1.8:
       if game["seq"]:
        game["called"].append(game["seq"].pop(0));game["last"]=now
        async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET called_numbers=CAST(:n AS jsonb) WHERE id=:i AND status='running'"),{"n":json.dumps(game["called"]),"i":game["id"]})
