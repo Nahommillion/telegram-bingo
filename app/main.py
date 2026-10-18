@@ -260,7 +260,8 @@ def winline(card,called):
  return next(([[r,c] for r,c in ln] for ln in lines if all(card[r][c] in m for r,c in ln)),None)
 async def loop():
  while True:
-  await asyncio.sleep(1)
+  # Check the lobby deadline frequently so a round starts immediately when the timer reaches 00:00.
+  await asyncio.sleep(0.1)
   try:
    async with lock:
     now=time.time()
