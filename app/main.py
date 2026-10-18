@@ -289,8 +289,12 @@ async def loop():
             await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":amount,"u":int(player_id)})
           await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":game["id"]})
           await c.execute(text("DELETE FROM bingo_game_entries WHERE game_id=:g"),{"g":game["id"]})
-        game["status"]="finished";game["seconds"]=0;game["finished_at_ts"]=now;game["players"]={};game["winner"]=None
-        logger.info("Bet %s Birr game #%s cancelled/refunded: fewer than two players",key,game["id"])
+        # Open the next 30-second lobby immediately after a cancelled single-player
+        # round, so the countdown never sits at 00:00 or waits for the finished-game delay.
+        async with engine.begin() as c:
+         gid=(await c.execute(text("INSERT INTO bingo_games(status,stake_amount) VALUES('waiting',:s) RETURNING id"),{"s":stake})).scalar_one()
+        _games_by_stake[key]=_blank_game(gid,stake)
+        logger.info("Bet %s Birr game #%s cancelled/refunded: fewer than two players; next lobby #%s opened immediately",key,game["id"],gid)
        else:
         game["status"]="running";game["seconds"]=0;game["seq"]=[n for n in range(1,76) if n not in set(game["called"])];random.shuffle(game["seq"]);game["last"]=now
         async with engine.begin() as c:
