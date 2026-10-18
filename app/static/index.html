@@ -628,8 +628,10 @@ async function toggleCallSound(){
    // Mobile Safari/Telegram WebViews require audio and speech to be unlocked
    // directly from a user gesture. Prime both engines here.
    if('speechSynthesis' in window&&typeof SpeechSynthesisUtterance!=='undefined'){
+    // Load available voices during the user's tap so mobile browsers can initialize TTS.
+    window.speechSynthesis.getVoices();
     window.speechSynthesis.cancel();
-    const unlock=new SpeechSynthesisUtterance('Ready');unlock.volume=0.01;unlock.lang='en-US';
+    const unlock=new SpeechSynthesisUtterance('Ready');unlock.volume=0.01;unlock.lang='en-US';unlock.rate=1;
     window.speechSynthesis.speak(unlock);speechPrimed=true;
    }
    playCallTone(null,true);
@@ -657,10 +659,12 @@ async function playCallTone(number,preview=false){
   try{
    const letter=number<=15?'B':number<=30?'I':number<=45?'N':number<=60?'G':'O';
    const utter=new SpeechSynthesisUtterance(`${letter}, ${numberWords(number)}`);
-   utter.lang='en-US';utter.rate=1.0;utter.pitch=1.0;utter.volume=1;
-   // Drop stale/priming speech so this called number starts now instead of
-   // waiting behind an old utterance on mobile browsers and Telegram WebViews.
-   window.speechSynthesis.cancel();
+   utter.lang='en-US';utter.rate=0.88;utter.pitch=1.0;utter.volume=1;
+   // Do not cancel each call: mobile Telegram WebViews can drop speech that is
+   // cancelled before the speech engine starts. Queue each number in order.
+   const voices=window.speechSynthesis.getVoices();
+   const preferred=voices.find(v=>/^en-US$/i.test(v.lang))||voices.find(v=>/^en/i.test(v.lang));
+   if(preferred)utter.voice=preferred;
    window.speechSynthesis.speak(utter);speechPrimed=true;
   }catch(e){console.log('Spoken number unavailable:',e);}
  }
