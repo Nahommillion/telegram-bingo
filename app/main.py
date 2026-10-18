@@ -273,35 +273,25 @@ async def loop():
        async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET lobby_started_at=COALESCE(lobby_started_at,NOW()) WHERE id=:i AND status='waiting'"),{"i":game["id"]})
       elapsed=now-game["lobby_started_at"];game["seconds"]=max(0,math.ceil(30-elapsed))
       if elapsed>=30:
-       # A round needs at least two distinct players. If the lobby has only
-       # one player, return every stake and close the empty round safely.
+       # Always start the round when the 30-second lobby reaches zero.
+       # If only one distinct player joined, refund the stake and allow a
+       # no-prize round so the player cannot lose money or win alone.
        unique_players={int(p.get("user_id")) for p in game["players"].values() if p.get("user_id") is not None}
        if len(unique_players)<2:
         async with engine.begin() as c:
-         closed=(await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW() WHERE id=:i AND status='waiting' RETURNING id"),{"i":game["id"]})).scalar_one_or_none()
-         if closed is not None:
-          refunds=(await c.execute(text("SELECT telegram_id,COALESCE(SUM(stake),0) FROM bingo_game_entries WHERE game_id=:g GROUP BY telegram_id"),{"g":game["id"]})).fetchall()
-          for player_id,amount in refunds:
-           amount=Decimal(str(amount or 0)).quantize(Decimal("0.01"))
-           if amount<=0: continue
-           ref=f"bingo:game:{game['id']}:refund:{int(player_id)}"
-           txid=(await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'bet_refund',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{"u":int(player_id),"a":amount,"d":f"Refund: game #{game['id']} did not start because fewer than two players joined","r":ref})).scalar_one_or_none()
-           if txid is not None:
-            await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":amount,"u":int(player_id)})
-          await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":game["id"]})
-          await c.execute(text("DELETE FROM bingo_game_entries WHERE game_id=:g"),{"g":game["id"]})
-        # Open the next 30-second lobby immediately after a cancelled single-player
-        # round, so the countdown never sits at 00:00 or waits for the finished-game delay.
-        async with engine.begin() as c:
-         gid=(await c.execute(text("INSERT INTO bingo_games(status,stake_amount) VALUES('waiting',:s) RETURNING id"),{"s":stake})).scalar_one()
-        _games_by_stake[key]=_blank_game(gid,stake)
-        logger.info("Bet %s Birr game #%s cancelled/refunded: fewer than two players; next lobby #%s opened immediately",key,game["id"],gid)
-       else:
-        game["status"]="running";game["seconds"]=0;game["seq"]=[n for n in range(1,76) if n not in set(game["called"])];random.shuffle(game["seq"]);game["last"]=now
-        async with engine.begin() as c:
-         await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
-         await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":game["id"]})
-        logger.info("Bet %s Birr game #%s started with %s players",key,game["id"],len(unique_players))
+         refunds=(await c.execute(text("SELECT telegram_id,COALESCE(SUM(stake),0) FROM bingo_game_entries WHERE game_id=:g GROUP BY telegram_id"),{"g":game["id"]})).fetchall()
+         for player_id,amount in refunds:
+          amount=Decimal(str(amount or 0)).quantize(Decimal("0.01"))
+          if amount<=0: continue
+          ref=f"bingo:game:{game['id']}:refund:{int(player_id)}"
+          txid=(await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'bet_refund',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{"u":int(player_id),"a":amount,"d":f"Refund: game #{game['id']} started with fewer than two distinct players; no stake charged","r":ref})).scalar_one_or_none()
+          if txid is not None:
+           await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":amount,"u":int(player_id)})
+       game["status"]="running";game["seconds"]=0;game["seq"]=[n for n in range(1,76) if n not in set(game["called"])];random.shuffle(game["seq"]);game["last"]=now
+       async with engine.begin() as c:
+        await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
+        await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":game["id"]})
+       logger.info("Bet %s Birr game #%s started at countdown zero with %s distinct players",key,game["id"],len(unique_players))
      elif game["status"]=="running" and now-game["last"]>=1.25:
       if game["seq"]:
        game["called"].append(game["seq"].pop(0));game["last"]=now
@@ -518,7 +508,11 @@ async def claim(req:Request):
    raise HTTPException(403,"False BINGO claim: your marks do not show a complete valid line. You are suspended for the rest of this round.")
   if g["winner"]:raise HTTPException(409,"Another player already won.")
   entries=list(g["players"].values());pot=sum((Decimal(str(x["stake"])) for x in entries),Decimal("0.00"))
-  prize=(pot*Decimal("0.80")).quantize(Decimal("0.01"));commission=(pot-prize).quantize(Decimal("0.01"))
+  distinct_players={int(x.get("user_id")) for x in entries if x.get("user_id") is not None}
+  if len(distinct_players)<2:
+   prize=Decimal("0.00");commission=Decimal("0.00")
+  else:
+   prize=(pot*Decimal("0.80")).quantize(Decimal("0.01"));commission=(pot-prize).quantize(Decimal("0.01"))
   g["winner"]={"telegram_id":uid,"name":p["name"],"cartela_number":p["n"],"cartela":p["card"],"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"commission":float(commission)};g["status"]="finished";g["finished_at_ts"]=time.time()
   async with engine.begin() as c:
    # Atomic conditional update prevents two simultaneous BINGO claims from
