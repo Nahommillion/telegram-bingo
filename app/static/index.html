@@ -13,9 +13,16 @@
 .emoji,.nav span{filter:none;text-shadow:none}
 .emoji{display:inline-grid;place-items:center;min-width:38px;height:36px;padding:2px 5px;border-radius:12px;background:linear-gradient(135deg,#ffe36a,#ffb02e 48%,#18d98a);box-shadow:0 3px 10px #0005;font-size:23px;line-height:1}
 .nav span{display:grid;place-items:center;min-width:32px;height:29px;border-radius:10px;background:linear-gradient(135deg,#ffe36a,#ffb02e 48%,#18d98a);color:#071525}
-.title h3{color:#ffd447;text-shadow:0 1px 12px #ffd44733}
-#quick::before{content:"✨";display:inline-grid;place-items:center;width:31px;height:31px;margin-right:8px;border-radius:10px;background:linear-gradient(135deg,#fff17b,#ffb12e);color:#5d2b00;text-shadow:none}
-#walletTitle::before{content:"💳";display:inline-grid;place-items:center;width:34px;height:32px;margin-right:8px;border-radius:10px;background:linear-gradient(135deg,#8bf7ff,#388cff);text-shadow:none}
+.title h3{color:#ffd447;text-shadow:0 1px 12px #ffd44733;display:flex;align-items:center;gap:8px}
+.heading-icon{display:inline-grid;place-items:center;flex:0 0 34px;width:34px;height:32px;border-radius:10px;background:linear-gradient(135deg,#ffe36a,#ffb02e 48%,#18d98a);box-shadow:0 3px 10px #0005;color:#071525;font-size:21px;line-height:1;text-shadow:none}
+#quick::before,#liveTitle::before,#gameTitle::before,#calledTitle::before,#profileTitle::before,#settings::before,#walletTitle::before{display:inline-grid;place-items:center;flex:0 0 34px;width:34px;height:32px;margin:0;border-radius:10px;box-shadow:0 3px 10px #0005;color:#071525;text-shadow:none;font-size:21px;line-height:1}
+#quick::before{content:"✨";background:linear-gradient(135deg,#fff17b,#ffb12e)}
+#liveTitle::before{content:"🎱";background:linear-gradient(135deg,#fff17b,#ffb12e 55%,#ff5b72)}
+#gameTitle::before{content:"🎮";background:linear-gradient(135deg,#9bf8c5,#12c879)}
+#calledTitle::before{content:"📣";background:linear-gradient(135deg,#8bf7ff,#388cff)}
+#profileTitle::before{content:"👤";background:linear-gradient(135deg,#d6b8ff,#8b78ff)}
+#settings::before{content:"⚙️";background:linear-gradient(135deg,#cbd5e1,#64748b)}
+#walletTitle::before{content:"💳";background:linear-gradient(135deg,#8bf7ff,#388cff)}
 button .emoji{display:inline-block}
 body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 60%);font-family:system-ui,Arial;color:var(--white);padding-bottom:82px}
 .float-bg{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0;opacity:.17}.float-bg span{position:absolute;font-size:28px;animation:drift 16s linear infinite}.float-bg span:nth-child(1){left:4%;top:18%}.float-bg span:nth-child(2){left:82%;top:12%;animation-delay:-4s}.float-bg span:nth-child(3){left:90%;top:55%;animation-delay:-8s}.float-bg span:nth-child(4){left:13%;top:72%;animation-delay:-12s}.float-bg span:nth-child(5){left:65%;top:86%;animation-delay:-6s}.float-bg span:nth-child(6){left:48%;top:34%;animation-delay:-10s}@keyframes drift{0%{transform:translateY(10vh) rotate(0deg)}50%{transform:translateY(-7vh) rotate(180deg)}100%{transform:translateY(10vh) rotate(360deg)}}.wrap,.bottom,.flag{position:relative;z-index:1}.flag{height:5px;background:linear-gradient(90deg,#078844 0 33.3%,#ffd447 33.3% 66.6%,#ed3346 66.6%)}
@@ -170,14 +177,14 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 <div class="stat"><span id="homeGameLabel">GAME</span><strong id="gameId">#1</strong></div>
 </div>
 <button class="primary" onclick="go('game')" id="play">🎮 Play Bingo Now</button>
-<div class="title"><h3 id="quick">✨ Quick Access</h3></div>
+<div class="title"><h3 id="quick">Quick Access</h3></div>
 <div class="grid">
 <button class="tile" onclick="go('wallet')"><span class="tile-label"><span class="emoji">💳</span><strong id="depositTile">Deposit Funds</strong></span><small id="depositTileHint">Telebirr • CBE • eBirr</small></button>
 <button class="tile" onclick="go('wallet')"><span class="tile-label"><span class="emoji">💰</span><strong id="walletTile">My Wallet</strong></span><small id="walletTileHint">Balance & history</small></button>
 <button class="tile" onclick="go('leaderboard')"><span class="tile-label"><span class="emoji">🏆</span><strong id="leaderTile">Leaderboard</strong></span><small id="leaderTileHint">Top players</small></button>
 <button class="tile" onclick="go('profile')"><span class="tile-label"><span class="emoji">👤</span><strong id="profileTile">My Profile</strong></span><small id="profileTileHint">Language & invite</small></button>
 </div>
-<div class="title"><h3 id="liveTitle">🎱 Live Game</h3><span class="pill" id="status">WAITING</span></div>
+<div class="title"><h3 id="liveTitle">Live Game</h3><span class="pill" id="status">WAITING</span></div>
 <div class="panel">
 <div class="muted small" id="lobbyHint">Choose a cartela to join the next game.</div>
 <div class="stats"><div><span class="muted small" id="homeTimerLabel">LOBBY TIMER</span><strong id="homeTimer">00:30</strong></div><div><span class="muted small" id="homePlayersLabel">PLAYERS</span><strong id="homeCount">0</strong></div><div><span class="muted small" id="homeCalledLabel">CALLED</span><strong id="homeCalled">0/75</strong></div></div>
@@ -186,7 +193,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 </section>
 
 <section class="screen" id="game">
-<div class="title"><h3 id="gameTitle">🎮 Game Lobby</h3><span class="pill" id="gameStatus">WAITING</span></div>
+<div class="title"><h3 id="gameTitle">Game Lobby</h3><span class="pill" id="gameStatus">WAITING</span></div>
 <div class="panel center">
 <div class="muted" id="chooseDesc">Choose your cartela and join the next game.</div>
 <div class="stats compact-stats">
@@ -200,7 +207,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 <button type="button" class="sound-toggle" id="soundToggle" onclick="toggleCallSound()">🔇 Enable called-number sound</button>
 <div class="stats called-stat-row"><div class="stat"><span id="calledStatLabel">CALLED</span><strong id="calledCount">0/75</strong></div></div>
 </div>
-<div class="title"><h3 id="calledTitle">📣 Called Numbers</h3></div>
+<div class="title"><h3 id="calledTitle">Called Numbers</h3></div>
 <div class="panel called-panel"><div class="chips" id="allCalled"></div></div>
 <div class="notice hidden" id="fundingNotice">💰 Please deposit funds and wait for payment verification. Your available wallet balance must cover at least one cartela at your selected bet amount. <button class="secondary" type="button" onclick="go('wallet')">Open Wallet</button></div>
 <div id="selectArea">
@@ -289,9 +296,9 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 </section>
 
 <section class="screen" id="profile">
-<div class="title"><h3 id="profileTitle">👤 Player Profile</h3></div>
+<div class="title"><h3 id="profileTitle">Player Profile</h3></div>
 <div class="panel"><div style="font-size:44px">🧑🏽‍🎮</div><h2 id="name">Player</h2><div class="muted" id="handle">Telegram player</div><div class="stat" style="margin-top:12px"><span id="profileBalLabel">AVAILABLE BALANCE</span><strong id="profileBal">0.00 Birr</strong></div><div class="notice" id="profileNote">Your Telegram identity is verified when opened from the bot.</div></div>
-<div class="title"><h3 id="settings">⚙️ Settings</h3></div>
+<div class="title"><h3 id="settings">Settings</h3></div>
 <div class="panel"><div class="row"><span data-en="🌐 Language" data-am="🌐 ቋንቋ">🌐 Language / ቋንቋ</span><button class="secondary" onclick="toggleLang()" data-en="English / አማርኛ" data-am="እንግሊዝኛ / አማርኛ">English / አማርኛ</button></div><div class="row"><span data-en="🆘 Support" data-am="🆘 ድጋፍ">🆘 Support</span><span class="muted small" data-en="Contact admin" data-am="አስተዳዳሪውን ያነጋግሩ">Contact admin</span></div><div class="row"><span data-en="👥 Referrals" data-am="👥 ግብዣዎች">👥 Referrals</span><span class="pill" id="refCount">0</span></div></div>
 </section>
 </div>
@@ -364,12 +371,12 @@ const strings = {
     play:'🎮 Play Bingo Now',quick:'Quick Access',
     depositTile:'Deposit Funds',walletTile:'My Wallet',
     leaderTile:'Leaderboard',profileTile:'My Profile',
-    liveTitle:'🎱 Live Game',lobbyHint:'Choose a cartela to join the next game.',
-    openLobby:'Open Game Lobby →',gameTitle:'🎮 Game Lobby',
+    liveTitle:'Live Game',lobbyHint:'Choose a cartela to join the next game.',
+    openLobby:'Open Game Lobby →',gameTitle:'Game Lobby',
     chooseDesc:'Choose your cartela and join the next game.',fundingNoticeText:'💰 Please deposit funds and wait for payment verification. Your available wallet balance must cover at least one cartela at your selected bet amount.',
     lastLabel:'📣 Last number called',chooseCard:'🎟️ Choose Your Cartela (1–200)',
     stakeLabel:'💵 Bet per cartela (minimum 2 Birr)',yourCard:'🎟️ Your Cartela',
-    calledTitle:'📣 Called Numbers',bingo:'🏆 BINGO!',
+    calledTitle:'Called Numbers',bingo:'🏆 BINGO!',
     walletTitle:'Wallet & Deposits',currentBalLabel:'💳 CURRENT BALANCE',
     autoNote:'✅ Deposits are credited automatically after payment confirmation. ⏳ Withdrawals may still require processing. 🛡️ Never send money to an unverified recipient.',
     depositReq:'➕ Create Deposit Request',submitDeposit:'🧾 Verify Receipt & Submit',
@@ -377,9 +384,9 @@ const strings = {
     txTitle:'📜 Transaction History',leaderTitle:'🏆 Leaderboard',
     inviteTitle:'👥 Invite Friends',
     inviteText:'Friends must open your link and press Start to register.',
-    copyBtn:'Copy Referral Link',profileTitle:'👤 Player Profile',
+    copyBtn:'Copy Referral Link',profileTitle:'Player Profile',
     profileNote:'Your Telegram identity is verified when opened from the bot.',
-    settings:'⚙️ Settings',navHome:'🏠 Home',navGame:'🎮 Game',
+    settings:'Settings',navHome:'🏠 Home',navGame:'🎮 Game',
     navWallet:'💳 Wallet',navLeaders:'🏆 Leaders',navProfile:'👤 Profile',
     available:'🟢 Available',taken:'⚫ Taken',select:'☑️ Select',joined:'✅ Selected',
     waiting:'WAITING',running:'LIVE',finished:'FINISHED',
@@ -403,16 +410,16 @@ const strings = {
     play:'🎮 ቢንጎ ይጫወቱ',quick:'ፈጣን አማራጮች',
     depositTile:'ገንዘብ ያስገቡ',walletTile:'የእኔ ሂሳብ',
     leaderTile:'ደረጃ ሰንጠረዥ',profileTile:'የእኔ መገለጫ',
-    liveTitle:'🎱 የቀጥታ ጨዋታ',
+    liveTitle:'የቀጥታ ጨዋታ',
     lobbyHint:'ቀጣዩን ጨዋታ ለመቀላቀል ካርቴላ ይምረጡ።',
     openLobby:'የጨዋታ ክፍል ይክፈቱ →',
-    gameTitle:'🎮 የጨዋታ ክፍል',
+    gameTitle:'የጨዋታ ክፍል',
     chooseDesc:'ካርቴላዎን ይምረጡና ይቀላቀሉ።',fundingNoticeText:'💰 እባክዎ ዋሌትዎን ይሙሉና የክፍያ ማረጋገጫውን ይጠብቁ። ያለዎት ቀሪ ሂሳብ ቢያንስ ለአንድ ካርቴላ በመረጡት ውርርድ መጠን በቂ መሆን አለበት።',
     lastLabel:'📣 የመጨረሻ የተጠራ ቁጥር',
     chooseCard:'🎟️ ካርቴላዎን ይምረጡ (1–200)',
     stakeLabel:'💵 ለእያንዳንዱ ካርቴላ ውርርድ (ቢያንስ 2 ብር)',
     yourCard:'🎟️ የእርስዎ ካርቴላ',
-    calledTitle:'📣 የተጠሩ ቁጥሮች',bingo:'🏆 ቢንጎ!',
+    calledTitle:'የተጠሩ ቁጥሮች',bingo:'🏆 ቢንጎ!',
     walletTitle:'ሂሳብና ተቀማጭ',
     currentBalLabel:'💳 የአሁኑ ሂሳብ',
     autoNote:'✅ ክፍያው ከተረጋገጠ በኋላ ገንዘብ ወዲያውኑ ወደ ዋሌትዎ ይጨመራል። ⏳ የገንዘብ ማውጣት ጥያቄዎች ሂደት ሊፈልጉ ይችላሉ። 🛡️ ያልተረጋገጠ ተቀባይ ገንዘብ አይላኩ።',
@@ -424,9 +431,9 @@ const strings = {
     inviteTitle:'👥 ጓደኞችን ይጋብዙ',
     inviteText:'ጓደኞች ሊንኩን ከፍተው Start መጫን አለባቸው።',
     copyBtn:'የግብዣ ሊንክ ቅዳ',
-    profileTitle:'👤 የተጫዋች መገለጫ',
+    profileTitle:'የተጫዋች መገለጫ',
     profileNote:'ከቦቱ ሲከፈት የTelegram መለያዎ ይረጋገጣል።',
-    settings:'⚙️ ቅንብሮች',navHome:'🏠 ቤት',navGame:'🎮 ጨዋታ',
+    settings:'ቅንብሮች',navHome:'🏠 ቤት',navGame:'🎮 ጨዋታ',
     navWallet:'💳 ሂሳብ',navLeaders:'🏆 ደረጃ',navProfile:'👤 መገለጫ',
     available:'🟢 ክፍት',taken:'⚫ ተይዟል',select:'☑️ ይምረጡ',
     joined:'✅ ተመርጧል',waiting:'በመጠባበቅ',
@@ -601,7 +608,7 @@ async function boot(){
     await refreshLeaders();
     applyLang();
     if(interval)clearInterval(interval);
-    interval=setInterval(()=>refreshGame().catch(()=>{}),1000);
+    interval=setInterval(()=>refreshGame().catch(()=>{}),500);
   }catch(e){
     msg(e.message,true);
   }
@@ -676,14 +683,15 @@ async function refreshGame(){
   // The old Taken Cartelas panel was intentionally removed. Do not write to its
   // deleted DOM nodes: that null assignment stopped cartela rendering and refreshes.
   const last=G.called.length?G.called[G.called.length-1]:null;
-  const newlyCalled=G.called.slice(lastSoundedCount);
+  const hasNewCall=G.called.length>lastSoundedCount;
   if(G.status==='waiting'&&G.called.length===0)lastSoundedCount=0;
   document.getElementById('lastNumber').textContent=last===null?'?':String(last);
   document.getElementById('lastLabel').textContent=last===null?t('waitingFirstNumber'):callLabel(last);
   document.getElementById('allCalled').innerHTML=G.called.slice().reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('')||t('empty');
   document.getElementById('recent').innerHTML=G.called.slice(-8).reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('');
-  // Announce only after the matching number is visible in the Mini App.
-  if(newlyCalled.length){if(G.status==='running'){newlyCalled.forEach((numberToAnnounce,index)=>window.setTimeout(()=>playCallTone(numberToAnnounce),60+index*180));}lastSoundedCount=G.called.length;}
+  // Speak the exact latest number visible in the large number display, after its DOM text is updated.
+  // If a slow phone misses a poll, skip stale calls rather than speaking a number that is no longer displayed.
+  if(hasNewCall){if(G.status==='running'&&last!==null)window.setTimeout(()=>playCallTone(last),40);lastSoundedCount=G.called.length;}
   const ownReservations=(G.reservations||[]).filter(r=>Number(r.telegram_id)===Number(me?.id)).map(r=>Number(r.cartela_number));
   for(const n of ownReservations)selectedCartelas.add(n);
   for(const n of [...selectedCartelas])if(!ownReservations.includes(Number(n))&&!pendingCartelas.has(Number(n)))selectedCartelas.delete(n);
