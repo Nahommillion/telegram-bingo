@@ -10,7 +10,12 @@
 :root{--bg:#071525;--panel:#102b40;--panel2:#173b50;--green:#12c879;--yellow:#ffd447;--red:#ef4055;--gold:#f8c947;--muted:#a8bfce;--white:#f7fbff}
 *{box-sizing:border-box}
 .emoji,.nav span,.ball,.float-bg span,button{font-family:system-ui,Arial,"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}
-.emoji,.nav span{filter:saturate(1.25);text-shadow:0 1px 3px #0006}
+.emoji,.nav span{filter:none;text-shadow:none}
+.emoji{display:inline-grid;place-items:center;min-width:38px;height:36px;padding:2px 5px;border-radius:12px;background:linear-gradient(135deg,#ffe36a,#ffb02e 48%,#18d98a);box-shadow:0 3px 10px #0005;font-size:23px;line-height:1}
+.nav span{display:grid;place-items:center;min-width:32px;height:29px;border-radius:10px;background:linear-gradient(135deg,#ffe36a,#ffb02e 48%,#18d98a);color:#071525}
+.title h3{color:#ffd447;text-shadow:0 1px 12px #ffd44733}
+#quick::before{content:"✨";display:inline-grid;place-items:center;width:31px;height:31px;margin-right:8px;border-radius:10px;background:linear-gradient(135deg,#fff17b,#ffb12e);color:#5d2b00;text-shadow:none}
+#walletTitle::before{content:"💳";display:inline-grid;place-items:center;width:34px;height:32px;margin-right:8px;border-radius:10px;background:linear-gradient(135deg,#8bf7ff,#388cff);text-shadow:none}
 button .emoji{display:inline-block}
 body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 60%);font-family:system-ui,Arial;color:var(--white);padding-bottom:82px}
 .float-bg{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0;opacity:.17}.float-bg span{position:absolute;font-size:28px;animation:drift 16s linear infinite}.float-bg span:nth-child(1){left:4%;top:18%}.float-bg span:nth-child(2){left:82%;top:12%;animation-delay:-4s}.float-bg span:nth-child(3){left:90%;top:55%;animation-delay:-8s}.float-bg span:nth-child(4){left:13%;top:72%;animation-delay:-12s}.float-bg span:nth-child(5){left:65%;top:86%;animation-delay:-6s}.float-bg span:nth-child(6){left:48%;top:34%;animation-delay:-10s}@keyframes drift{0%{transform:translateY(10vh) rotate(0deg)}50%{transform:translateY(-7vh) rotate(180deg)}100%{transform:translateY(10vh) rotate(360deg)}}.wrap,.bottom,.flag{position:relative;z-index:1}.flag{height:5px;background:linear-gradient(90deg,#078844 0 33.3%,#ffd447 33.3% 66.6%,#ed3346 66.6%)}
@@ -43,7 +48,7 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
 .title h3{margin:0;font-size:17px}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .tile{min-height:94px;text-align:left;padding:14px;border-radius:17px;background:linear-gradient(145deg,#17384d,#10263a);border:1px solid #2a5266;color:white;display:flex;flex-direction:column;justify-content:space-between}
-.tile .emoji{font-size:24px}
+.tile-label{display:flex;align-items:center;gap:8px;min-width:0}.tile-label strong{line-height:1.25}.tile .emoji{font-size:21px;min-width:32px;height:30px;border-radius:9px}
 .tile strong{font-size:14px}
 .tile small{color:var(--muted)}
 .screen{display:none}
@@ -167,10 +172,10 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 <button class="primary" onclick="go('game')" id="play">🎮 Play Bingo Now</button>
 <div class="title"><h3 id="quick">✨ Quick Access</h3></div>
 <div class="grid">
-<button class="tile" onclick="go('wallet')"><span class="emoji">💳</span><strong id="depositTile">Deposit Funds</strong><small id="depositTileHint">Telebirr • CBE • eBirr</small></button>
-<button class="tile" onclick="go('wallet')"><span class="emoji">💰</span><strong id="walletTile">My Wallet</strong><small id="walletTileHint">Balance & history</small></button>
-<button class="tile" onclick="go('leaderboard')"><span class="emoji">🏆</span><strong id="leaderTile">Leaderboard</strong><small id="leaderTileHint">Top players</small></button>
-<button class="tile" onclick="go('profile')"><span class="emoji">👤</span><strong id="profileTile">My Profile</strong><small id="profileTileHint">Language & invite</small></button>
+<button class="tile" onclick="go('wallet')"><span class="tile-label"><span class="emoji">💳</span><strong id="depositTile">Deposit Funds</strong></span><small id="depositTileHint">Telebirr • CBE • eBirr</small></button>
+<button class="tile" onclick="go('wallet')"><span class="tile-label"><span class="emoji">💰</span><strong id="walletTile">My Wallet</strong></span><small id="walletTileHint">Balance & history</small></button>
+<button class="tile" onclick="go('leaderboard')"><span class="tile-label"><span class="emoji">🏆</span><strong id="leaderTile">Leaderboard</strong></span><small id="leaderTileHint">Top players</small></button>
+<button class="tile" onclick="go('profile')"><span class="tile-label"><span class="emoji">👤</span><strong id="profileTile">My Profile</strong></span><small id="profileTileHint">Language & invite</small></button>
 </div>
 <div class="title"><h3 id="liveTitle">🎱 Live Game</h3><span class="pill" id="status">WAITING</span></div>
 <div class="panel">
@@ -273,8 +278,8 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
   <p class="muted small" data-en="Check the recipient and amount carefully. Transfers to other registered players are immediate and cannot be automatically reversed." data-am="ተቀባዩንና መጠኑን በጥንቃቄ ያረጋግጡ። ለተመዘገቡ ተጫዋቾች የሚላክ ገንዘብ ወዲያውኑ ይደርሳል፣ በራስ-ሰር መመለስም አይቻልም።">Check the recipient and amount carefully. Transfers to other registered players are immediate and cannot be automatically reversed.</p>
  </div>
  <details class="panel collapsible" id="depositRequestsDetails"><summary><span id="depositRequestsTitle">📥 Deposit Requests</span><span id="depositRequestCount" class="pill">0 ⌄</span></summary><div id="deposits"></div></details>
- <div class="title"><h3 id="withdrawRequestsTitle">Withdrawal Requests</h3></div><div class="panel" id="withdrawals"></div>
- <div class="title"><h3 id="txTitle">📜 Transaction History</h3></div><div class="panel" id="transactions"></div>
+ <details class="panel collapsible" id="withdrawRequestsDetails"><summary><span id="withdrawRequestsTitle">⬇️ Withdrawal Requests</span><span class="pill">⌄</span></summary><div id="withdrawals"></div></details>
+ <details class="panel collapsible" id="transactionHistoryDetails"><summary><span id="txTitle">📜 Transaction History</span><span class="pill">⌄</span></summary><div id="transactions"></div></details>
  </section>
 
 <section class="screen" id="leaderboard">
@@ -356,16 +361,16 @@ const strings = {
     hero:'🎉 Welcome to Goferehabesha Cartela Bingo!',
     tagline:'Choose a cartela. Follow the numbers. Claim your win! 🎱',
     balLabel:'💰 YOUR BALANCE',playersLabel:'👥 PLAYERS',profileBalLabel:'💳 AVAILABLE BALANCE',
-    play:'🎮 Play Bingo Now',quick:'✨ Quick Access',
-    depositTile:'💳 Deposit Funds',walletTile:'💰 My Wallet',
-    leaderTile:'🏆 Leaderboard',profileTile:'👤 My Profile',
+    play:'🎮 Play Bingo Now',quick:'Quick Access',
+    depositTile:'Deposit Funds',walletTile:'My Wallet',
+    leaderTile:'Leaderboard',profileTile:'My Profile',
     liveTitle:'🎱 Live Game',lobbyHint:'Choose a cartela to join the next game.',
     openLobby:'Open Game Lobby →',gameTitle:'🎮 Game Lobby',
     chooseDesc:'Choose your cartela and join the next game.',fundingNoticeText:'💰 Please deposit funds and wait for payment verification. Your available wallet balance must cover at least one cartela at your selected bet amount.',
     lastLabel:'📣 Last number called',chooseCard:'🎟️ Choose Your Cartela (1–200)',
     stakeLabel:'💵 Bet per cartela (minimum 2 Birr)',yourCard:'🎟️ Your Cartela',
     calledTitle:'📣 Called Numbers',bingo:'🏆 BINGO!',
-    walletTitle:'💳 Wallet & Deposits',currentBalLabel:'💳 CURRENT BALANCE',
+    walletTitle:'Wallet & Deposits',currentBalLabel:'💳 CURRENT BALANCE',
     autoNote:'✅ Deposits are credited automatically after payment confirmation. ⏳ Withdrawals may still require processing. 🛡️ Never send money to an unverified recipient.',
     depositReq:'➕ Create Deposit Request',submitDeposit:'🧾 Verify Receipt & Submit',
     depositHelp:'Supported receipt links or payment text are verified. Wallet credit requires a confirmed transaction, exact amount, ETB currency, and completed payment status. eBirr may require a separate supported verification integration.',
@@ -395,9 +400,9 @@ const strings = {
     hero:'🎉 ወደ ጎፈሬሀበሻ ካርቴላ ቢንጎ እንኳን በደህና መጡ!',
     tagline:'ካርቴላ ይምረጡ። ቁጥሮችን ይከታተሉ። ያሸንፉ! 🎱',
     balLabel:'💰 ቀሪ ሂሳብዎ',playersLabel:'👥 ተጫዋቾች',profileBalLabel:'💳 ያለው ቀሪ ሂሳብ',
-    play:'🎮 ቢንጎ ይጫወቱ',quick:'✨ ፈጣን አማራጮች',
-    depositTile:'💳 ገንዘብ ያስገቡ',walletTile:'💰 የእኔ ሂሳብ',
-    leaderTile:'🏆 ደረጃ ሰንጠረዥ',profileTile:'👤 የእኔ መገለጫ',
+    play:'🎮 ቢንጎ ይጫወቱ',quick:'ፈጣን አማራጮች',
+    depositTile:'ገንዘብ ያስገቡ',walletTile:'የእኔ ሂሳብ',
+    leaderTile:'ደረጃ ሰንጠረዥ',profileTile:'የእኔ መገለጫ',
     liveTitle:'🎱 የቀጥታ ጨዋታ',
     lobbyHint:'ቀጣዩን ጨዋታ ለመቀላቀል ካርቴላ ይምረጡ።',
     openLobby:'የጨዋታ ክፍል ይክፈቱ →',
@@ -408,7 +413,7 @@ const strings = {
     stakeLabel:'💵 ለእያንዳንዱ ካርቴላ ውርርድ (ቢያንስ 2 ብር)',
     yourCard:'🎟️ የእርስዎ ካርቴላ',
     calledTitle:'📣 የተጠሩ ቁጥሮች',bingo:'🏆 ቢንጎ!',
-    walletTitle:'💳 ሂሳብና ተቀማጭ',
+    walletTitle:'ሂሳብና ተቀማጭ',
     currentBalLabel:'💳 የአሁኑ ሂሳብ',
     autoNote:'✅ ክፍያው ከተረጋገጠ በኋላ ገንዘብ ወዲያውኑ ወደ ዋሌትዎ ይጨመራል። ⏳ የገንዘብ ማውጣት ጥያቄዎች ሂደት ሊፈልጉ ይችላሉ። 🛡️ ያልተረጋገጠ ተቀባይ ገንዘብ አይላኩ።',
     depositReq:'➕ የተቀማጭ ጥያቄ ይፍጠሩ',
