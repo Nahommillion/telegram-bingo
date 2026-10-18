@@ -272,11 +272,31 @@ async def loop():
        async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET lobby_started_at=COALESCE(lobby_started_at,NOW()) WHERE id=:i AND status='waiting'"),{"i":game["id"]})
       elapsed=now-game["lobby_started_at"];game["seconds"]=max(0,math.ceil(30-elapsed))
       if elapsed>=30:
-       game["status"]="running";game["seconds"]=0;game["seq"]=[n for n in range(1,76) if n not in set(game["called"])];random.shuffle(game["seq"]);game["last"]=now
-       async with engine.begin() as c:
-        await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
-        await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":game["id"]})
-       logger.info("Bet %s Birr game #%s started with %s players",key,game["id"],len({p.get("user_id") for p in game["players"].values()}))
+       # A round needs at least two distinct players. If the lobby has only
+       # one player, return every stake and close the empty round safely.
+       unique_players={int(p.get("user_id")) for p in game["players"].values() if p.get("user_id") is not None}
+       if len(unique_players)<2:
+        async with engine.begin() as c:
+         closed=(await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW() WHERE id=:i AND status='waiting' RETURNING id"),{"i":game["id"]})).scalar_one_or_none()
+         if closed is not None:
+          refunds=(await c.execute(text("SELECT telegram_id,COALESCE(SUM(stake),0) FROM bingo_game_entries WHERE game_id=:g GROUP BY telegram_id"),{"g":game["id"]})).fetchall()
+          for player_id,amount in refunds:
+           amount=Decimal(str(amount or 0)).quantize(Decimal("0.01"))
+           if amount<=0: continue
+           ref=f"bingo:game:{game['id']}:refund:{int(player_id)}"
+           txid=(await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'bet_refund',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{"u":int(player_id),"a":amount,"d":f"Refund: game #{game['id']} did not start because fewer than two players joined","r":ref})).scalar_one_or_none()
+           if txid is not None:
+            await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":amount,"u":int(player_id)})
+          await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":game["id"]})
+          await c.execute(text("DELETE FROM bingo_game_entries WHERE game_id=:g"),{"g":game["id"]})
+        game["status"]="finished";game["seconds"]=0;game["finished_at_ts"]=now;game["players"]={};game["winner"]=None
+        logger.info("Bet %s Birr game #%s cancelled/refunded: fewer than two players",key,game["id"])
+       else:
+        game["status"]="running";game["seconds"]=0;game["seq"]=[n for n in range(1,76) if n not in set(game["called"])];random.shuffle(game["seq"]);game["last"]=now
+        async with engine.begin() as c:
+         await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
+         await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":game["id"]})
+        logger.info("Bet %s Birr game #%s started with %s players",key,game["id"],len(unique_players))
      elif game["status"]=="running" and now-game["last"]>=1.25:
       if game["seq"]:
        game["called"].append(game["seq"].pop(0));game["last"]=now
