@@ -153,7 +153,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 .wallet-howto summary::-webkit-details-marker,.collapsible summary::-webkit-details-marker{display:none}
 .wallet-howto[open] summary,.collapsible[open] summary{padding-bottom:10px;border-bottom:1px solid #31576b}
 .collapsible #deposits{padding-top:8px}
-.winner-card{max-width:270px;margin:12px auto;padding:9px;background:#102b40;border:1px solid #ffd447;border-radius:13px}
+.winner-card{max-width:270px;margin:12px auto;padding:9px;background:#102b40;border:1px solid #ffd447;border-radius:13px}.winner-celebration{margin:10px auto;padding:12px;text-align:center;border:1px solid #ffd447;border-radius:14px;background:linear-gradient(135deg,#123c32,#102b40);color:#ffd447;font-weight:1000;animation:winner-pop .55s ease-out}.winner-celebration .party{font-size:25px;letter-spacing:5px;animation:twinkle .8s ease-in-out infinite alternate}.winner-celebration .winner-name{font-size:19px;color:#fff;margin-top:5px}.winner-celebration .winner-prize{font-size:16px;color:#baffd7;margin-top:5px}@keyframes winner-pop{0%{transform:scale(.88);opacity:.4}100%{transform:scale(1);opacity:1}}
 .winner-card h4{margin:0 0 8px;color:#ffd447;text-align:center}
 .winner-card .cell{pointer-events:none}
 @media(max-width:380px){.compact-stats .stat{padding:6px 3px}.compact-stats .stat span{font-size:8px}.compact-stats .stat strong{font-size:11px}}
@@ -720,7 +720,7 @@ async function refreshGame(){
   if(G.winner){
     document.getElementById('claimMsg').textContent='🏆 '+G.winner.name+' '+t('wonWithCartela')+' #'+G.winner.cartela_number+' — '+t('prizeWord')+' '+money(G.winner.prize||0)+'.';
     document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
-    if(winnerHost&&Array.isArray(G.winner.cartela)){const marked=new Set((G.winner.pattern||[]).map(x=>x.join(',')));winnerHost.classList.remove('hidden');winnerHost.innerHTML='<div class="winner-card"><h4>🏆 '+(L==='am'?'አሸናፊ ካርቴላ':'Winning Cartela')+' #'+G.winner.cartela_number+'</h4><div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div><div class="card">'+G.winner.cartela.flatMap((row,r)=>row.map((v,c)=>'<div class="cell '+(marked.has([r,c].join(','))?'win':'')+'">'+(v===0?'★':v)+'</div>')).join('')+'</div></div>';}
+    if(winnerHost&&Array.isArray(G.winner.cartela)){const marked=new Set((G.winner.pattern||[]).map(x=>x.join(',')));winnerHost.classList.remove('hidden');winnerHost.innerHTML='<div class="winner-celebration"><div class="party">🎉 🎊 🏆 🎊 🎉</div><div>'+(L==='am'?'አሸናፊ!':'WE HAVE A WINNER!')+'</div><div class="winner-name">'+esc(G.winner.name||'Player')+' — '+(L==='am'?'ካርቴላ':'Cartela')+' #'+G.winner.cartela_number+'</div><div class="winner-prize">💰 '+(L==='am'?'ሽልማት':'Prize')+': '+money(G.winner.prize||0)+'</div></div><div class="winner-card"><h4>🏆 '+(L==='am'?'አሸናፊ ካርቴላ':'Winning Cartela')+' #'+G.winner.cartela_number+'</h4><div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div><div class="card">'+G.winner.cartela.flatMap((row,r)=>row.map((v,c)=>'<div class="cell '+(marked.has([r,c].join(','))?'win':'')+'">'+(v===0?'★':v)+'</div>')).join('')+'</div></div>';}
   }else if(G.status==='running') {document.getElementById('claimMsg').classList.add('hidden');if(winnerHost)winnerHost.classList.add('hidden');}
   if(G.status==='finished'&&!G.winner){document.getElementById('claimMsg').textContent=(Number(G.total_bets||0)===0?t('noBetsRound'):t('noWinnerRound'));document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');if(winnerHost)winnerHost.classList.add('hidden');}
   if(G.status==='waiting'&&!G.winner&&winnerHost)winnerHost.classList.add('hidden');
@@ -839,7 +839,7 @@ async function claim(cartela){
   const marks=manualMarksByCard[Number(cartela)]||new Set([0]);
   const r=await api('/api/game/claim',{method:'POST',body:JSON.stringify({cartela_number:Number(cartela),marked:[...marks]})});
   winCells=r.pattern||[];
-  document.getElementById('claimMsg').textContent=`🏆 Valid BINGO! Prize: ${money(r.prize)} (80% of ${money(r.total_bets)} total bets).`;
+  document.getElementById('claimMsg').textContent=`🎉🏆 WINNER! Cartela #${r.cartela_number||cartela} — Prize: ${money(r.prize)} (80% of ${money(r.total_bets)} total bets)! 🎊`;
   document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
   await refreshGame();await refreshWallet();telegramApp()?.HapticFeedback?.notificationOccurred('success');
  }catch(e){
