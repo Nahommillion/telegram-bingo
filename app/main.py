@@ -292,7 +292,7 @@ async def loop():
         await c.execute(text("UPDATE bingo_games SET status='running',started_at=NOW() WHERE id=:i AND status='waiting'"),{"i":game["id"]})
         await c.execute(text("DELETE FROM bingo_cartela_reservations WHERE game_id=:g"),{"g":game["id"]})
        logger.info("Bet %s Birr game #%s started at countdown zero with %s distinct players",key,game["id"],len(unique_players))
-     elif game["status"]=="running" and now-game["last"]>=1.8:
+     elif game["status"]=="running" and now-game["last"]>=2.0:
       if game["seq"]:
        game["called"].append(game["seq"].pop(0));game["last"]=now
        async with engine.begin() as c: await c.execute(text("UPDATE bingo_games SET called_numbers=CAST(:n AS jsonb) WHERE id=:i AND status='running'"),{"n":json.dumps(game["called"]),"i":game["id"]})
@@ -510,26 +510,30 @@ async def claim(req:Request):
    prize=Decimal("0.00");commission=Decimal("0.00")
   else:
    prize=(pot*Decimal("0.80")).quantize(Decimal("0.01"));commission=(pot-prize).quantize(Decimal("0.01"))
-  g["winner"]={"telegram_id":uid,"name":p["name"],"cartela_number":p["n"],"cartela":p["card"],"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"commission":float(commission)};g["status"]="finished";g["finished_at_ts"]=time.time()
+  winner_result={"telegram_id":uid,"name":p["name"],"cartela_number":p["n"],"cartela":p["card"],"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"commission":float(commission)}
+  # Commit the winner and all ledger changes together. Do not mutate the
+  # in-memory game until the database transaction succeeds; otherwise a DB
+  # error could leave the game looking finished without a credited prize.
   async with engine.begin() as c:
-   # Atomic conditional update prevents two simultaneous BINGO claims from
-   # paying the same round twice, including across app workers/restarts.
    won=(await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),winner_telegram_id=:u,called_numbers=CAST(:n AS jsonb) WHERE id=:g AND status='running' AND winner_telegram_id IS NULL RETURNING id"),{"u":uid,"n":json.dumps(g["called"]),"g":g["id"]})).scalar_one_or_none()
    if won is None:
     raise HTTPException(409,"This game has already been won. Refresh for the result.")
    if prize:
-    txid=(await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'win',:a,'verified',:d,:r) ON CONFLICT(external_reference) DO NOTHING RETURNING id"),{"u":uid,"a":prize,"d":f"Bingo prize (80% of {pot} Birr total bets)","r":f"bingo:game:{g['id']}:winner"})).scalar_one_or_none()
+    # Targetless ON CONFLICT supports both legacy full unique constraints and
+    # the partial external_reference index created by newer deployments.
+    txid=(await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'win',:a,'verified',:d,:r) ON CONFLICT DO NOTHING RETURNING id"),{"u":uid,"a":prize,"d":f"Bingo prize (80% of {pot} Birr total bets)","r":f"bingo:game:{g['id']}:winner"})).scalar_one_or_none()
     if txid is not None:
      await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":prize,"u":uid})
    if commission and OWNER_ID.isdigit():
     owner=int(OWNER_ID)
     await c.execute(text("INSERT INTO bingo_users(telegram_id,display_name) VALUES(:i,'Platform Owner') ON CONFLICT(telegram_id) DO NOTHING"),{"i":owner})
-    await c.execute(text("INSERT INTO bingo_wallets(telegram_id) VALUES(:i) ON CONFLICT(telegram_id) DO NOTHING"),{"i":owner})
+    await c.execute(text("INSERT INTO bingo_wallets(telegram_id) VALUES(:i) ON CONFLICT DO NOTHING"),{"i":owner})
     await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:i"),{"a":commission,"i":owner})
     await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description) VALUES(:i,'platform_commission',:a,'verified',:d)"),{"i":owner,"a":commission,"d":f"20% platform commission from game #{g['id']}"})
    elif commission:
     await c.execute(text("UPDATE bingo_platform_wallet SET balance=balance+:a,updated_at=NOW() WHERE id=1"),{"a":commission})
-  return {"ok":True,"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"platform_commission":float(commission)}
+  g["winner"]=winner_result;g["status"]="finished";g["finished_at_ts"]=time.time()
+  return {"ok":True,"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"platform_commission":float(commission),"winner_name":p["name"],"cartela_number":p["n"]}
 @app.get("/api/public-payment-methods")
 async def public_payment_methods():
  # CBE Birr receiving numbers intentionally reuse the Telebirr phone numbers
