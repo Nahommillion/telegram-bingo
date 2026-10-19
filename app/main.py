@@ -498,14 +498,11 @@ async def claim(req:Request):
     await c.execute(text("INSERT INTO bingo_game_suspensions(game_id,telegram_id,reason) VALUES(:g,:u,:r) ON CONFLICT(game_id,telegram_id) DO NOTHING"),{"g":g["id"],"u":uid,"r":"BINGO claim had no completed winning line"})
    g["suspended"].add(uid)
    raise HTTPException(403,"False BINGO claim: you are suspended from claiming for the rest of this round.")
-  valid_marked=(marked & set(g["called"])) | {0}
-  lines=[[(r,c) for c in range(5)] for r in range(5)]+[[(r,c) for r in range(5)] for c in range(5)]+[[(i,i) for i in range(5)],[(i,4-i) for i in range(5)],[(0,0),(0,4),(4,0),(4,4)]]
-  marked_line=next(([[r,c] for r,c in ln] for ln in lines if all(p["card"][r][c] in valid_marked for r,c in ln)),None)
-  if not marked_line:
-   async with engine.begin() as c:
-    await c.execute(text("INSERT INTO bingo_game_suspensions(game_id,telegram_id,reason) VALUES(:g,:u,:r) ON CONFLICT(game_id,telegram_id) DO NOTHING"),{"g":g["id"],"u":uid,"r":"BINGO claim included an incomplete or incorrectly marked line"})
-   g["suspended"].add(uid)
-   raise HTTPException(403,"False BINGO claim: your marks do not show a complete valid line. You are suspended for the rest of this round.")
+  # The server is authoritative: a claim is valid when the called numbers
+  # complete a winning line on this cartela. Do not require extra manual
+  # tapping of every cell; mobile clients may not have marked every called cell.
+  # The winline check above already rejects false claims and preserves suspension.
+  marked_line=line
   if g["winner"]:raise HTTPException(409,"Another player already won.")
   entries=list(g["players"].values());pot=sum((Decimal(str(x["stake"])) for x in entries),Decimal("0.00"))
   distinct_players={int(x.get("user_id")) for x in entries if x.get("user_id") is not None}
