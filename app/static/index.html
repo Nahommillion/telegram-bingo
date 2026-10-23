@@ -229,6 +229,23 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 #game.active:not(.playing-mode) #roundMessage:not(.hidden){display:block!important;grid-column:1/-1!important}
 @media(max-width:360px){#game.active .game-workspace{grid-template-columns:minmax(108px,34%) minmax(0,66%)!important;gap:4px!important;padding-left:4px!important;padding-right:4px!important}#game.active .game-workspace .cardgrid{grid-template-columns:repeat(3,minmax(0,1fr))!important}}
 
+
+/* Requested final refinements: slightly smaller live cartelas, active call highlight,
+   remove redundant home-game statistics, and tighten Wallet/Leaderboard header spacing. */
+@media(max-width:700px){
+ #game.active.playing-mode .game-workspace{grid-template-columns:minmax(112px,34%) minmax(0,66%)!important;gap:5px!important}
+ #game.active.playing-mode .game-workspace .call-num{min-height:clamp(14px,2.8dvh,21px)!important;font-size:clamp(8px,2.15vw,10px)!important}
+ #game.active.playing-mode .game-workspace .cartela-side{max-height:calc(100dvh - 120px)!important;overflow-y:auto!important}
+ #game.active.playing-mode #playing .my-card-item{padding:3px!important;border-radius:8px!important}
+ #game.active.playing-mode #playing .my-card-item .card-caption{font-size:10px!important;margin-bottom:3px!important}
+ #game.active.playing-mode #playing .my-card-item .bhead{font-size:10px!important;padding:1px 0!important}
+ #game.active.playing-mode #playing .my-card-item .card{gap:1px!important;padding:1px!important}
+ #game.active.playing-mode #playing .my-card-item .cell{font-size:clamp(7px,1.8vw,9px)!important;min-height:17px!important;line-height:1!important}
+ #wallet>.title,#leaderboard>.title{margin-top:0!important;padding-top:0!important}
+ #wallet,#leaderboard{padding-top:0!important}
+ #home>.stats>.stat:not(:first-child){display:none!important}
+ #home>#liveTitle,#home>#liveTitle+.panel{display:none!important}
+}
 </style>
 </head>
 <body>
@@ -749,7 +766,8 @@ function renderCalloutBoard(called=[]){
  const host=document.getElementById('calloutBoard');if(!host)return;
  const cols=[['B',1,15],['I',16,30],['N',31,45],['G',46,60],['O',61,75]];
  const set=new Set((called||[]).map(Number));
- host.innerHTML=cols.map(([letter,start,end])=>`<div class="call-col"><div class="call-col-head">${letter}</div><div class="call-col-list">${Array.from({length:end-start+1},(_,i)=>start+i).map(n=>`<div class="call-num ${set.has(n)?'called':''}" aria-label="${letter} ${n}">${n}</div>`).join('')}</div></div>`).join('');
+ const current=(called||[]).length?Number((called||[])[(called||[]).length-1]):null;
+ host.innerHTML=cols.map(([letter,start,end])=>`<div class="call-col"><div class="call-col-head">${letter}</div><div class="call-col-list">${Array.from({length:end-start+1},(_,i)=>start+i).map(n=>`<div class="call-num ${current===n?'called':''}" aria-label="${letter} ${n}">${n}</div>`).join('')}</div></div>`).join('');
 }
 async function chooseHomeBet(amount){
  const liveStatus=String(G?.status||'waiting');
