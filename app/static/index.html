@@ -246,6 +246,13 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
  #home>.stats>.stat:not(:first-child){display:none!important}
  #home>#liveTitle,#home>#liveTitle+.panel{display:none!important}
 }
+
+.home-round-countdown{margin:8px 0 12px;text-align:center;padding:9px 12px;border:1px solid #31576b;border-radius:12px;background:#0b2032}
+.home-round-countdown strong{display:block;font-size:22px;line-height:1.2;color:#ffd447;margin:3px 0}
+.home-round-countdown .small{font-size:11px}
+/* Winner announcement appears centered over the game as a compact toast. */
+#game.active #winnerCartela .winner-celebration{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(88vw,390px);max-width:88vw;margin:0;z-index:9999;box-shadow:0 18px 70px #000b;pointer-events:none}
+#game.active #winnerCartela .winner-celebration .party{font-size:22px}
 </style>
 </head>
 <body>
@@ -269,6 +276,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 <div class="stat"><span id="homeGameLabel">GAME</span><strong id="gameId">#1</strong></div>
 </div>
 <div class="title"><h3 id="betChooseTitle">Choose Your Bet</h3></div><div class="bet-choice-row"><button class="bet-choice" onclick="chooseHomeBet(2)">2 Birr</button><button class="bet-choice" onclick="chooseHomeBet(3)">3 Birr</button><button class="bet-choice" onclick="chooseHomeBet(5)">5 Birr</button></div>
+<div class="panel home-round-countdown" id="homeRoundCountdown"><div class="muted small" id="homeRoundCountdownLabel">⏳ NEXT ROUND STARTS IN</div><strong id="homeRoundCountdownValue">00:30</strong><div class="muted small" id="homeRoundCountdownHint">Choose your bet and cartela while the countdown is running.</div></div>
 <div class="title"><h3 id="quick">Quick Access</h3></div>
 <div class="grid">
 <button class="tile" onclick="go('wallet')"><span class="tile-label"><span class="emoji">💳</span><strong id="depositTile">Deposit Funds</strong></span><small id="depositTileHint">Telebirr • CBE • eBirr</small></button>
@@ -791,6 +799,9 @@ async function refreshGame(){
   document.getElementById('homeCount').textContent=G.player_count;
   document.getElementById('count').textContent=G.player_count;
   document.getElementById('homeTimer').textContent='00:'+String(Math.max(0,G.lobby_seconds)).padStart(2,'0');
+  const homeRoundCountdownValue=document.getElementById('homeRoundCountdownValue');if(homeRoundCountdownValue)homeRoundCountdownValue.textContent='00:'+String(Math.max(0,G.lobby_seconds)).padStart(2,'0');
+  const homeRoundCountdownLabel=document.getElementById('homeRoundCountdownLabel');if(homeRoundCountdownLabel)homeRoundCountdownLabel.textContent=G.status==='waiting'?(L==='am'?'⏳ ቀጣዩ ዙር የሚጀምረው በ':'⏳ NEXT ROUND STARTS IN'):(L==='am'?'🎮 ጨዋታው እየተካሄደ ነው':'🎮 GAME IN PROGRESS');
+  const homeRoundCountdownHint=document.getElementById('homeRoundCountdownHint');if(homeRoundCountdownHint)homeRoundCountdownHint.textContent=G.status==='waiting'?(L==='am'?'ቆጠራው ሲቀጥል ውርርድ እና ካርቴላ ይምረጡ':'Choose your bet and cartela while the countdown is running.'):(L==='am'?'እባክዎ ጨዋታው እስኪያልቅ ይጠብቁ':'Please wait until this game finishes.');
   document.getElementById('timer').textContent='00:'+String(Math.max(0,G.lobby_seconds)).padStart(2,'0');
   document.getElementById('homeCalled').textContent=G.called.length+'/75';
   document.getElementById('calledCount').textContent=G.called.length+'/75';
