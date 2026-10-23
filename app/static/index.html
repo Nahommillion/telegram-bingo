@@ -159,6 +159,25 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 .winner-card .cell{pointer-events:none}
 @media(max-width:380px){.compact-stats .stat{padding:6px 3px}.compact-stats .stat span{font-size:8px}.compact-stats .stat strong{font-size:11px}}
 
+
+/* Side-by-side live board: called numbers stay visible while players choose cartelas. */
+.game-workspace{display:grid;grid-template-columns:minmax(145px,0.42fr) minmax(0,0.58fr);gap:10px;align-items:start}
+.game-workspace .called-side{position:sticky;top:4px;min-width:0}
+.game-workspace .cartela-side{min-width:0}
+.game-workspace .called-panel{margin:0;padding:6px}
+.game-workspace .callout-board{gap:2px;margin:0}
+.game-workspace .call-col-list{gap:2px;padding:2px}
+.game-workspace .call-col-head{padding:6px 1px;font-size:15px}
+.game-workspace .call-num{min-height:22px;font-size:11px}
+.game-workspace #availableCartelasTitle{font-size:15px}
+.game-workspace #chooseCard{font-size:14px}
+.game-workspace #cartelaSearch,.game-workspace #stake,.game-workspace #stakeLabel,.game-workspace #betSummary,.game-workspace #selectedLabel,.game-workspace #selectedCartelaLabel{display:none!important}
+.game-workspace .selection-summary{display:none!important}
+.game-workspace .cardgrid{grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+.game-workspace .pick{padding:7px 1px;min-width:0}
+.game-workspace .cartela-side .panel{padding:8px}
+@media(max-width:420px){.game-workspace{grid-template-columns:minmax(132px,0.43fr) minmax(0,0.57fr);gap:6px}.game-workspace .call-num{min-height:20px;font-size:10px}.game-workspace .cardgrid{grid-template-columns:repeat(3,minmax(0,1fr))}.game-workspace .call-col-head{font-size:13px}}
+
 </style>
 </head>
 <body>
@@ -205,12 +224,10 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
  <div class="stat"><span id="totalBetsLabel">TOTAL BETS</span><strong id="totalBets">0.00 Birr</strong></div>
  <div class="stat"><span id="prizeLabel">WINNER GETS</span><strong id="prizeAmount">0.00 Birr</strong></div>
 </div>
-<div class="number" id="lastNumber">?</div>
-<div class="muted" id="lastLabel" style="font-weight:900;font-size:17px;margin-top:-7px">Waiting for first number</div>
 <button type="button" class="sound-toggle" id="soundToggle" onclick="toggleCallSound()">🔇 Enable called-number sound</button>
 <div class="stats called-stat-row"><div class="stat"><span id="calledStatLabel">CALLED</span><strong id="calledCount">0/75</strong></div></div>
 </div>
-<div class="title"><h3 id="calledTitle">Called Numbers — B I N G O</h3></div><div class="panel called-panel"><div id="calloutBoard" class="callout-board"></div><div class="chips hidden" id="allCalled"></div></div>
+<div class="game-workspace"><div class="called-side"><div class="title"><h3 id="calledTitle">Called Numbers — B I N G O</h3></div><div class="panel called-panel"><div id="calloutBoard" class="callout-board"></div><div class="chips hidden" id="allCalled"></div></div></div><div class="cartela-side">
 <div class="notice hidden" id="fundingNotice">💰 Please deposit funds and wait for payment verification. Your available wallet balance must cover at least one cartela at your selected bet amount. <button class="secondary" type="button" onclick="go('wallet')">Open Wallet</button></div>
 <div id="selectArea">
  <div class="title"><h3 id="availableCartelasTitle">🟢 Available Cartelas</h3><span class="muted small" id="availableCount">200 available</span></div>
@@ -225,10 +242,10 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
   <button class="primary" id="startGameBtn" onclick="startSelectedGame()" disabled>🎮 Start Game</button><button class="secondary wide" type="button" onclick="cancelCartelaSelection()">Cancel selection</button>
   <div class="cardgrid" id="choices"></div>
  </div>
-</div>
+</div></div></div>
 <div id="playing" class="hidden">
  <div class="title"><h3 id="yourCard">Your Cartela</h3><span class="pill" id="cardNum"></span></div>
- <div class="panel"><div class="chips recent-called" id="recent"></div><div id="myCards"></div><div id="claimMsg" class="notice hidden"></div><div id="winnerCartela" class="hidden"></div></div>
+ <div class="panel"><div class="chips recent-called hidden" id="recent"></div><div id="myCards"></div><div id="claimMsg" class="notice hidden"></div><div id="winnerCartela" class="hidden"></div></div>
 </div>
 </section>
 
@@ -709,9 +726,8 @@ async function refreshGame(){
   const last=G.called.length?G.called[G.called.length-1]:null;
   const hasNewCall=G.called.length>lastSoundedCount;
   if(G.status==='waiting'&&G.called.length===0)lastSoundedCount=0;
-  document.getElementById('lastNumber').textContent=last===null?'?':String(last);
-  document.getElementById('lastLabel').textContent=last===null?t('waitingFirstNumber'):callLabel(last);
-  document.getElementById('lastNumber').setAttribute('aria-label',last===null?t('waitingFirstNumber'):'Current called number '+callLabel(last));
+  const lastNumberEl=document.getElementById('lastNumber');if(lastNumberEl){lastNumberEl.textContent=last===null?'?':String(last);lastNumberEl.setAttribute('aria-label',last===null?t('waitingFirstNumber'):'Current called number '+callLabel(last));}
+  const lastLabelEl=document.getElementById('lastLabel');if(lastLabelEl)lastLabelEl.textContent=last===null?t('waitingFirstNumber'):callLabel(last);
   document.getElementById('allCalled').innerHTML=G.called.slice().reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('')||t('empty');
   renderCalloutBoard(G.called);
   document.getElementById('recent').innerHTML=G.called.slice(-8).reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('');
