@@ -80,7 +80,8 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
 .cell.marked{background:#20d78a;color:#052b1b}.mini-card-wrap{max-width:270px;margin:0 auto}#myCards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;align-items:start}.my-card-item{width:100%;min-width:0;max-width:none;margin:0;padding:7px;background:#102b40;border:1px solid #31576b;border-radius:13px}.my-card-item .bhead{padding:3px 0;font-size:12px}.my-card-item .card{gap:1px;padding:3px}.my-card-item .cell{font-size:clamp(9px,2.4vw,12px);border-radius:3px}.card-caption{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin-bottom:6px}.provider-brand-strip{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:10px 0}.provider-brand{min-width:0;background:#0b2032;border:1px solid #294d61;border-radius:12px;padding:10px 4px;color:white;font-weight:900;display:flex;flex-direction:column;align-items:center;gap:5px}.provider-brand.active{border-color:#18db8b;box-shadow:0 0 0 1px #18db8b66;background:#123c32}.provider-brand svg{width:31px;height:25px}.provider-brand img{width:38px;height:30px;object-fit:contain;background:#fff;border-radius:7px;padding:3px}.provider-logo img{width:38px;height:38px;object-fit:contain;background:white;border-radius:9px;padding:3px}.sound-toggle{margin:8px auto 0;display:block;background:#183a4d;border:1px solid #2a5c6d;color:white;border-radius:10px;padding:8px 12px;font-weight:800}.sound-toggle.on{border-color:#12c879;color:#8fffc7}.sms-box{min-height:125px;resize:vertical;white-space:pre-wrap}.provider-brand small{font-size:10px;color:#c8dce8}.brand-fallback{width:38px;height:30px;place-items:center;background:#fff;color:#087b46;border-radius:7px;font-weight:1000;font-size:16px}.cell{cursor:pointer;user-select:none}.cell.uncalled{opacity:.62}.provider-list{display:grid;gap:9px;margin:12px 0}.provider-row{display:flex;align-items:center;gap:10px;background:#0b2032;border:1px solid #294d61;border-radius:13px;padding:10px}.provider-logo{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border-radius:12px;background:linear-gradient(135deg,#078844,#ffd447);color:#061525;font-weight:1000;font-size:13px}.provider-row .details{flex:1;min-width:0}.copy-small{border:1px solid #426779;border-radius:9px;background:#17384d;color:white;padding:8px}.wallet-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:12px 0}.wallet-tab{padding:11px 5px;border-radius:11px;border:1px solid #2a5266;background:#17384d;color:white;font-weight:800}.wallet-tab.active{background:#12a968;color:#06291b;border-color:#65f0b0}.wallet-pane{display:none}.wallet-pane.active{display:block}
 .owner-share-hidden{display:none!important}
 .cell.win{background:#ffd447!important;color:#201800;box-shadow:0 0 0 2px white,0 0 14px #ffd447}
-.number{width:80px;height:80px;margin:14px auto;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 30% 25%,white,#ffd447 32%,#d59a06);border:5px solid white;box-shadow:0 0 0 4px #13c879,0 0 25px #ffd44788;color:#0a1c2a;font-size:30px;font-weight:1000;animation:float 2s infinite}
+.number{width:min(100%,300px);height:118px;margin:12px auto 10px;border-radius:18px;display:grid;place-items:center;background:linear-gradient(135deg,#12394b,#0b2535 55%,#075c54);border:2px solid #2edbb3;box-shadow:0 0 0 3px #13c87922,0 8px 24px #0005;color:#fff;font-size:clamp(64px,17vw,94px);letter-spacing:1px;font-weight:1000;text-shadow:0 3px 0 #0005;animation:none}
+.home-profile{display:flex;align-items:center;gap:13px;margin:12px 0 14px;padding:15px;border-radius:18px;background:linear-gradient(125deg,#13566a,#123c50);border:1px solid #287487;box-shadow:0 8px 22px #0003}.home-avatar{width:66px;height:66px;flex:0 0 66px;border-radius:50%;object-fit:cover;border:3px solid #20e5b2;background:#0a2839}.home-profile-main{min-width:0;flex:1}.home-profile-name{font-size:19px;font-weight:900;overflow-wrap:anywhere}.home-profile-phone{display:inline-block;margin-top:4px;padding:4px 9px;border-radius:16px;background:#1b667b;color:#d8f7ff;font-size:13px}.home-profile-balance{padding:9px 11px;border:1px solid #2c8799;border-radius:13px;text-align:center;background:#105066;white-space:nowrap}.home-profile-balance strong{display:block;font-size:18px;color:#fff}.home-profile-balance small{color:#a9f3ff;font-weight:800}.home-profile .profile-greeting{margin-top:9px;padding:8px;border-radius:10px;background:#2a6655;color:#fff2a8;font-size:12px;font-weight:800;text-align:center;grid-column:1/-1}.home-profile-wrap{display:grid;grid-template-columns:66px minmax(0,1fr) auto;align-items:center;gap:12px}.home-profile-wrap .profile-greeting{grid-column:1/-1}
 .chips{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0}
 .chip{background:#17394c;border:1px solid #2a5b6c;border-radius:20px;padding:5px 8px;font-size:12px}
 .notice{background:#123c32;border:1px solid #22795d;color:#c8ffe8;border-radius:12px;padding:11px;margin:10px 0;font-size:13px}
@@ -172,6 +173,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 
 <section class="screen active" id="home">
 <div class="hero"><h2 id="hero">🎉 Welcome to Goferehabesha Cartela Bingo!</h2><p id="tagline">Choose a cartela. Follow the numbers. Claim your win! 🎱</p><div class="balls"><span class="ball">7</span><span class="ball">23</span><span class="ball">46</span></div></div>
+<div class="panel home-profile"><div class="home-profile-wrap"><img class="home-avatar" id="homeAvatar" alt="Player profile" src=""><div class="home-profile-main"><div class="home-profile-name" id="homeProfileName">Player</div><div class="home-profile-phone" id="homeProfilePhone">Telegram player</div></div><div class="home-profile-balance"><small id="homeProfileBalanceLabel">BALANCE</small><strong id="homeProfileBalance">0.00 Birr</strong></div><div class="profile-greeting" id="homeProfileGreeting">👋 Welcome back!</div></div></div>
 <div class="stats">
 <div class="stat"><span id="balLabel">YOUR BALANCE</span><strong id="homeBal">0.00 Birr</strong></div>
 <div class="stat"><span id="playersLabel">PLAYERS</span><strong id="homePlayers">0</strong></div>
@@ -298,7 +300,6 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 
 <section class="screen" id="profile">
 <div class="title"><h3 id="profileTitle">Player Profile</h3></div>
-<div class="panel"><div style="font-size:44px">🧑🏽‍🎮</div><h2 id="name">Player</h2><div class="muted" id="handle">Telegram player</div><div class="stat" style="margin-top:12px"><span id="profileBalLabel">AVAILABLE BALANCE</span><strong id="profileBal">0.00 Birr</strong></div><div class="notice" id="profileNote">Your Telegram identity is verified when opened from the bot.</div></div>
 <div class="title"><h3 id="settings">Settings</h3></div>
 <div class="panel"><div class="row"><span data-en="🌐 Language" data-am="🌐 ቋንቋ">🌐 Language / ቋንቋ</span><button class="secondary" onclick="toggleLang()" data-en="English / አማርኛ" data-am="እንግሊዝኛ / አማርኛ">English / አማርኛ</button></div><div class="row"><span data-en="🆘 Support" data-am="🆘 ድጋፍ">🆘 Support</span><span class="muted small" data-en="Contact admin" data-am="አስተዳዳሪውን ያነጋግሩ">Contact admin</span></div><div class="row"><span data-en="👥 Referrals" data-am="👥 ግብዣዎች">👥 Referrals</span><span class="pill" id="refCount">0</span></div></div>
 </section>
@@ -596,6 +597,7 @@ async function boot(){
     L=me.language||'en';
     document.getElementById('name').textContent=me.name;
     document.getElementById('handle').textContent=me.username?'@'+me.username:'Telegram player';
+    updateHomeProfile();
     document.getElementById('refLink').value=me.referral_link;
     document.getElementById('refCount').textContent=me.referrals;
     await refreshGame();
@@ -693,6 +695,7 @@ async function refreshGame(){
   if(G.status==='waiting'&&G.called.length===0)lastSoundedCount=0;
   document.getElementById('lastNumber').textContent=last===null?'?':String(last);
   document.getElementById('lastLabel').textContent=last===null?t('waitingFirstNumber'):callLabel(last);
+  document.getElementById('lastNumber').setAttribute('aria-label',last===null?t('waitingFirstNumber'):'Current called number '+callLabel(last));
   document.getElementById('allCalled').innerHTML=G.called.slice().reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('')||t('empty');
   document.getElementById('recent').innerHTML=G.called.slice(-8).reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('');
   // Trigger audio in this same refresh, immediately after updating the visible
@@ -857,6 +860,7 @@ async function refreshWallet(){
     availableWalletBalance=Number(w.available_balance??w.balance??0);
     document.getElementById('homeBal').textContent=money(w.balance);
     document.getElementById('walletBal').textContent=money(w.available_balance??w.balance);
+    const hpBal=document.getElementById('homeProfileBalance');if(hpBal)hpBal.textContent=money(w.available_balance??w.balance);
     const profileBal=document.getElementById('profileBal');if(profileBal)profileBal.textContent=money(w.available_balance??w.balance);
     document.getElementById('deposits').innerHTML=w.deposits.map(d=>
       `<div class="row"><span>${esc(d.provider)}<br><small class="muted">${esc(d.reference)} · ${esc(d.status)}</small></span><b>${money(d.amount)}</b></div>`
@@ -1015,6 +1019,18 @@ async function refreshLeaders(){
   }
 }
 
+
+function updateHomeProfile(){
+  if(!me)return;
+  const name=me.name||'Player';
+  const user=telegramApp()?.initDataUnsafe?.user||{};
+  const nameEl=document.getElementById('homeProfileName');if(nameEl)nameEl.textContent=name;
+  const phoneEl=document.getElementById('homeProfilePhone');if(phoneEl)phoneEl.textContent=me.phone_number|| (me.username?'@'+me.username:'Telegram player');
+  const balEl=document.getElementById('homeProfileBalance');if(balEl)balEl.textContent=money(me.balance||0);
+  const greet=document.getElementById('homeProfileGreeting');if(greet)greet.textContent='👋 '+(L==='am'?'እንኳን ደህና መጡ':'Welcome back')+', '+name+'! ✨';
+  const avatar=document.getElementById('homeAvatar');if(avatar){if(user.photo_url){avatar.src=user.photo_url;avatar.style.display='block';}else{avatar.src='';avatar.style.display='none';}}
+}
+
 async function refreshMe(){
   try{
     me=await api('/api/me');
@@ -1022,6 +1038,7 @@ async function refreshMe(){
     document.getElementById('refCount').textContent=me.referrals;
     document.getElementById('name').textContent=me.name;
     document.getElementById('handle').textContent=me.username?'@'+me.username:'Telegram player';
+    updateHomeProfile();
   }catch(e){
     msg(e.message,true);
   }
