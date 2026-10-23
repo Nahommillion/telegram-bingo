@@ -178,6 +178,43 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 .game-workspace .cartela-side .panel{padding:8px}
 @media(max-width:420px){.game-workspace{grid-template-columns:minmax(132px,0.43fr) minmax(0,0.57fr);gap:6px}.game-workspace .call-num{min-height:20px;font-size:10px}.game-workspace .cardgrid{grid-template-columns:repeat(3,minmax(0,1fr))}.game-workspace .call-col-head{font-size:13px}}
 
+
+/* Focused layout correction: full-screen cartela picker, fixed left call board, compact home. */
+@media(max-width:700px){
+ .wrap{padding:8px 9px 76px}
+ .top{gap:8px}.mark{width:40px;height:40px;flex-basis:40px;border-radius:10px}.brand{gap:7px}.brand h1{font-size:14px;line-height:1.15}.brand small{font-size:10px}
+ .hero{margin:7px 0;padding:10px 12px;border-radius:14px}.hero h2{font-size:16px;line-height:1.2;margin:0 0 3px}.hero p{font-size:11px;line-height:1.25;max-width:78%}.balls{right:7px;bottom:6px;gap:2px}.ball{width:23px;height:23px;font-size:11px;border-width:2px}
+ .home-profile{margin:6px 0;padding:8px;gap:7px;border-radius:12px}.home-profile-wrap{grid-template-columns:38px minmax(0,1fr) auto;gap:6px}.home-avatar{width:38px;height:38px;flex-basis:38px;border-width:2px}.home-profile-name{font-size:13px}.home-profile-phone{font-size:10px;margin-top:2px;padding:2px 5px}.home-profile-balance{padding:5px 6px;border-radius:8px}.home-profile-balance strong{font-size:12px}.home-profile-balance small{font-size:9px}.home-profile .profile-greeting{margin-top:4px;padding:4px;font-size:10px}
+ .title{margin:9px 1px 6px}.title h3{font-size:14px}.stat,.panel{padding:8px;border-radius:11px}.stats{gap:5px;margin:6px 0}.stat span{font-size:9px}.stat strong{font-size:13px;margin-top:2px}.bet-choice-row{gap:6px;margin:7px 0}.bet-choice{padding:9px 3px;font-size:14px;border-radius:10px}.tile{min-height:65px;padding:8px;border-radius:12px}.tile strong{font-size:12px}.tile small{font-size:10px}.grid{gap:6px}
+}
+/* On the game screen the selection area is a dedicated full-screen workspace. */
+#game.active{position:relative}
+#game.active .game-workspace{position:fixed!important;inset:0!important;z-index:20!important;width:100vw!important;height:100dvh!important;max-width:none!important;margin:0!important;padding:env(safe-area-inset-top) 6px calc(8px + env(safe-area-inset-bottom))!important;background:#071525!important;display:grid!important;grid-template-columns:minmax(118px,32%) minmax(0,68%)!important;gap:6px!important;align-items:stretch!important;overflow:hidden!important}
+#game.active .game-workspace .called-side{position:relative!important;top:auto!important;min-width:0!important;height:100%!important;overflow:hidden!important;display:flex!important;flex-direction:column!important}
+#game.active .game-workspace .called-side>.title{margin:5px 1px!important;flex:0 0 auto!important}
+#game.active .game-workspace .called-side .title h3{font-size:12px!important;line-height:1.1!important}
+#game.active .game-workspace .called-panel{flex:1!important;min-height:0!important;overflow:auto!important;padding:3px!important;margin:0!important}
+#game.active .game-workspace .callout-board{grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:2px!important;margin:0!important}
+#game.active .game-workspace .call-col{min-width:0!important;border-radius:5px!important}
+#game.active .game-workspace .call-col-head{padding:5px 0!important;font-size:12px!important}
+#game.active .game-workspace .call-col-list{gap:2px!important;padding:2px!important}
+#game.active .game-workspace .call-num{min-height:clamp(17px,3.65dvh,29px)!important;font-size:clamp(9px,2.8vw,13px)!important;border-radius:3px!important}
+#game.active .game-workspace .cartela-side{min-width:0!important;height:100%!important;overflow-y:auto!important;overscroll-behavior:contain!important;padding-bottom:12px!important}
+#game.active .game-workspace .cartela-side .title{margin:5px 1px!important;gap:4px!important}
+#game.active .game-workspace #availableCartelasTitle{font-size:13px!important;line-height:1.1!important}
+#game.active .game-workspace #availableCount{font-size:9px!important;white-space:nowrap!important}
+#game.active .game-workspace .cartela-side .panel{padding:5px!important;border-radius:8px!important}
+#game.active .game-workspace #chooseCard{font-size:11px!important}
+#game.active .game-workspace #cartelaHelp{font-size:9px!important;line-height:1.2!important;margin:3px 0!important}
+#game.active .game-workspace #cartelaSearch,#game.active .game-workspace #stake,#game.active .game-workspace #stakeLabel,#game.active .game-workspace #betSummary,#game.active .game-workspace #selectedLabel,#game.active .game-workspace #selectedCartelaLabel,#game.active .game-workspace .selection-summary{display:none!important}
+#game.active .game-workspace .cardgrid{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:3px!important;max-height:none!important;overflow:visible!important;padding:1px!important}
+#game.active .game-workspace .pick{min-width:0!important;min-height:31px!important;padding:4px 1px!important;font-size:10px!important;border-radius:5px!important}
+#game.active .game-workspace #startGameBtn,#game.active .game-workspace .cartela-side .secondary{font-size:11px!important;padding:8px 4px!important;margin-top:5px!important;border-radius:8px!important}
+/* Keep lobby status and sound controls accessible without covering the board. */
+#game.active>.title,#game.active>.panel.center{display:none!important}
+#game.active .game-workspace .called-side:before{content:'B I N G O';display:block;text-align:center;color:#ffd447;font-size:12px;font-weight:900;padding:5px 0}
+@media(max-width:360px){#game.active .game-workspace{grid-template-columns:minmax(108px,34%) minmax(0,66%)!important;gap:4px!important;padding-left:4px!important;padding-right:4px!important}#game.active .game-workspace .cardgrid{grid-template-columns:repeat(3,minmax(0,1fr))!important}}
+
 </style>
 </head>
 <body>
