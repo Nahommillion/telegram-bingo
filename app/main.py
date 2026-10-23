@@ -38,6 +38,7 @@ class _GameProxy:
  def get(self,k,default=None): return self._game().get(k,default)
  def setdefault(self,k,default=None): return self._game().setdefault(k,default)
  def update(self,*a,**kw): return self._game().update(*a,**kw)
+ def setdefault(self,k,default=None): return self._game().setdefault(k,default)
  @property
  def values(self): return self._game().values
 g=_GameProxy()
