@@ -182,24 +182,24 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 /* Focused layout correction: full-screen cartela picker, fixed left call board, compact home. */
 @media(max-width:700px){
  .wrap{padding:8px 9px 76px}
- .top{gap:8px}.mark{width:40px;height:40px;flex-basis:40px;border-radius:10px}.brand{gap:7px}.brand h1{font-size:14px;line-height:1.15}.brand small{font-size:10px}
+ .top{gap:8px}.mark{width:30px;height:30px;flex-basis:30px;border-radius:8px}.brand{gap:7px}.brand h1{font-size:12px;line-height:1.15}.brand small{font-size:10px}
  .hero{margin:7px 0;padding:10px 12px;border-radius:14px}.hero h2{font-size:16px;line-height:1.2;margin:0 0 3px}.hero p{font-size:11px;line-height:1.25;max-width:78%}.balls{right:7px;bottom:6px;gap:2px}.ball{width:23px;height:23px;font-size:11px;border-width:2px}
  .home-profile{margin:6px 0;padding:8px;gap:7px;border-radius:12px}.home-profile-wrap{grid-template-columns:38px minmax(0,1fr) auto;gap:6px}.home-avatar{width:38px;height:38px;flex-basis:38px;border-width:2px}.home-profile-name{font-size:13px}.home-profile-phone{font-size:10px;margin-top:2px;padding:2px 5px}.home-profile-balance{padding:5px 6px;border-radius:8px}.home-profile-balance strong{font-size:12px}.home-profile-balance small{font-size:9px}.home-profile .profile-greeting{margin-top:4px;padding:4px;font-size:10px}
  .title{margin:9px 1px 6px}.title h3{font-size:14px}.stat,.panel{padding:8px;border-radius:11px}.stats{gap:5px;margin:6px 0}.stat span{font-size:9px}.stat strong{font-size:13px;margin-top:2px}.bet-choice-row{gap:6px;margin:7px 0}.bet-choice{padding:9px 3px;font-size:14px;border-radius:10px}.tile{min-height:65px;padding:8px;border-radius:12px}.tile strong{font-size:12px}.tile small{font-size:10px}.grid{gap:6px}
 }
-/* On the game screen the selection area is a dedicated full-screen workspace. */
+/* Cartela picker and live-game layout: keep selected cartelas visible beside calls. */
 #game.active{position:relative}
-#game.active .game-workspace{position:fixed!important;inset:0!important;z-index:20!important;width:100vw!important;height:100dvh!important;max-width:none!important;margin:0!important;padding:env(safe-area-inset-top) 6px calc(8px + env(safe-area-inset-bottom))!important;background:#071525!important;display:grid!important;grid-template-columns:minmax(118px,32%) minmax(0,68%)!important;gap:6px!important;align-items:stretch!important;overflow:hidden!important}
-#game.active .game-workspace .called-side{position:relative!important;top:auto!important;min-width:0!important;height:100%!important;overflow:hidden!important;display:flex!important;flex-direction:column!important}
+#game.active .game-workspace{position:relative!important;inset:auto!important;z-index:1!important;width:100%!important;height:auto!important;max-width:none!important;margin:0!important;padding:6px!important;background:#071525!important;display:grid!important;grid-template-columns:minmax(118px,32%) minmax(0,68%)!important;gap:6px!important;align-items:start!important;overflow:visible!important}
+#game.active .game-workspace .called-side{position:relative!important;top:auto!important;min-width:0!important;height:auto!important;overflow:visible!important;display:flex!important;flex-direction:column!important}
 #game.active .game-workspace .called-side>.title{margin:5px 1px!important;flex:0 0 auto!important}
 #game.active .game-workspace .called-side .title h3{font-size:12px!important;line-height:1.1!important}
-#game.active .game-workspace .called-panel{flex:1!important;min-height:0!important;overflow:auto!important;padding:3px!important;margin:0!important}
+#game.active .game-workspace .called-panel{min-height:0!important;overflow:auto!important;padding:3px!important;margin:0!important}
 #game.active .game-workspace .callout-board{grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:2px!important;margin:0!important}
 #game.active .game-workspace .call-col{min-width:0!important;border-radius:5px!important}
 #game.active .game-workspace .call-col-head{padding:5px 0!important;font-size:12px!important}
 #game.active .game-workspace .call-col-list{gap:2px!important;padding:2px!important}
 #game.active .game-workspace .call-num{min-height:clamp(17px,3.65dvh,29px)!important;font-size:clamp(9px,2.8vw,13px)!important;border-radius:3px!important}
-#game.active .game-workspace .cartela-side{min-width:0!important;height:100%!important;overflow-y:auto!important;overscroll-behavior:contain!important;padding-bottom:12px!important}
+#game.active .game-workspace .cartela-side{min-width:0!important;height:auto!important;overflow:visible!important;padding-bottom:12px!important}
 #game.active .game-workspace .cartela-side .title{margin:5px 1px!important;gap:4px!important}
 #game.active .game-workspace #availableCartelasTitle{font-size:13px!important;line-height:1.1!important}
 #game.active .game-workspace #availableCount{font-size:9px!important;white-space:nowrap!important}
@@ -210,24 +210,17 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 #game.active .game-workspace .cardgrid{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:3px!important;max-height:none!important;overflow:visible!important;padding:1px!important}
 #game.active .game-workspace .pick{min-width:0!important;min-height:31px!important;padding:4px 1px!important;font-size:10px!important;border-radius:5px!important}
 #game.active .game-workspace #startGameBtn,#game.active .game-workspace .cartela-side .secondary{font-size:11px!important;padding:8px 4px!important;margin-top:5px!important;border-radius:8px!important}
-/* Keep lobby status and sound controls accessible without covering the board. */
-#game.active>.title,#game.active>.panel.center{display:none!important}
+#game.active:not(.playing-mode) .game-workspace .called-side{display:none!important}
+#game.active:not(.playing-mode) .game-workspace .cartela-side{grid-column:1/-1!important}
+#game.active.playing-mode .game-workspace .cartela-side{display:none!important}
+#game.active.playing-mode #playing{position:relative;z-index:2;margin:8px 0 0 32%;padding:0 4px}
+#game.active.playing-mode #playing #myCards{grid-template-columns:1fr!important}
+#game.active.playing-mode #playing .my-card-item{max-width:100%!important}
 #game.active .game-workspace .called-side:before{content:'B I N G O';display:block;text-align:center;color:#ffd447;font-size:12px;font-weight:900;padding:5px 0}
+#game.active #playing{position:relative;z-index:2;margin:8px 0 0 32%;padding:0 4px}
+#game.active #playing #myCards{grid-template-columns:1fr!important}
+#game.active #playing .my-card-item{max-width:100%!important}
 @media(max-width:360px){#game.active .game-workspace{grid-template-columns:minmax(108px,34%) minmax(0,66%)!important;gap:4px!important;padding-left:4px!important;padding-right:4px!important}#game.active .game-workspace .cardgrid{grid-template-columns:repeat(3,minmax(0,1fr))!important}}
-
-
-/* Cartela flow: picker is its own full-screen step; live play pairs call board with owned cards. */
-#game.active .game-workspace:has(#selectArea:not(.hidden)){position:fixed!important;inset:0!important;z-index:20!important;width:100vw!important;height:100dvh!important;display:block!important;overflow:auto!important;padding:env(safe-area-inset-top) 10px calc(12px + env(safe-area-inset-bottom))!important;background:#071525!important}
-#game.active .game-workspace:has(#selectArea:not(.hidden)) .called-side{display:none!important}
-#game.active .game-workspace:has(#selectArea:not(.hidden)) .cartela-side{height:auto!important;overflow:visible!important;width:100%!important;max-width:900px!important;margin:0 auto!important}
-#game.active .game-workspace:has(#selectArea:not(.hidden)) .cardgrid{grid-template-columns:repeat(5,minmax(0,1fr))!important;max-height:none!important;overflow:visible!important}
-#game.active .game-workspace:has(#selectArea:not(.hidden)) #cartelaSearch,#game.active .game-workspace:has(#selectArea:not(.hidden)) #stake,#game.active .game-workspace:has(#selectArea:not(.hidden)) #stakeLabel,#game.active .game-workspace:has(#selectArea:not(.hidden)) #betSummary,#game.active .game-workspace:has(#selectArea:not(.hidden)) .selection-summary{display:none!important}
-#game.active .game-workspace:has(#selectArea.hidden) .cartela-side{display:none!important}
-#game.active #playing:not(.hidden){position:fixed!important;inset:0!important;z-index:21!important;margin:0!important;padding:env(safe-area-inset-top) 6px calc(8px + env(safe-area-inset-bottom))!important;overflow:auto!important;background:#071525!important;pointer-events:auto!important}
-#game.active #playing:not(.hidden) .title{display:none!important}
-#game.active #playing:not(.hidden)>.panel{margin:0!important;padding:4px!important;background:transparent!important;border:0!important}
-#game.active #playing:not(.hidden) #myCards{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:6px!important}
-@media(max-width:420px){#game.active .game-workspace:has(#selectArea:not(.hidden)) .cardgrid{grid-template-columns:repeat(5,minmax(0,1fr))!important}}
 
 </style>
 </head>
@@ -247,6 +240,8 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 <div class="stats">
 <div class="stat"><span id="balLabel">YOUR BALANCE</span><strong id="homeBal">0.00 Birr</strong></div>
 <div class="stat"><span id="playersLabel">PLAYERS</span><strong id="homePlayers">0</strong></div>
+<div class="stat"><span id="homeTotalBetsLabel">TOTAL BETS</span><strong id="homeTotalBets">0.00 Birr</strong></div>
+<div class="stat"><span id="homePrizeLabel">WINNER GETS / ደራሽ</span><strong id="homePrizeAmount">0.00 Birr</strong></div>
 <div class="stat"><span id="homeGameLabel">GAME</span><strong id="gameId">#1</strong></div>
 </div>
 <div class="title"><h3 id="betChooseTitle">Choose Your Bet</h3></div><div class="bet-choice-row"><button class="bet-choice" onclick="chooseHomeBet(2)">2 Birr</button><button class="bet-choice" onclick="chooseHomeBet(3)">3 Birr</button><button class="bet-choice" onclick="chooseHomeBet(5)">5 Birr</button></div>
@@ -748,6 +743,8 @@ function renderCalloutBoard(called=[]){
  host.innerHTML=cols.map(([letter,start,end])=>`<div class="call-col"><div class="call-col-head">${letter}</div><div class="call-col-list">${Array.from({length:end-start+1},(_,i)=>start+i).map(n=>`<div class="call-num ${set.has(n)?'called':''}" aria-label="${letter} ${n}">${n}</div>`).join('')}</div></div>`).join('');
 }
 async function chooseHomeBet(amount){
+ const liveStatus=String(G?.status||'waiting');
+ if(liveStatus!=='waiting'){msg(L==='am'?'ጨዋታው ተጀምሯል። እባክዎ በሚቀጥለው ዙር ይሳተፉ።':'The game has started. Please join the next round.',true);return;}
  const bal=Number(availableWalletBalance??me?.balance??0);
  const stake=document.getElementById('stake');if(stake){stake.value=String(amount);currentLobbyStake=amount;}
  if(bal<amount){msg(`Your available balance is ${money(bal)}. You need at least ${money(amount)} to join this game. Please deposit first.`,true);go('wallet');return;}
@@ -772,6 +769,8 @@ async function refreshGame(){
   document.getElementById('calledCount').textContent=G.called.length+'/75';
   document.getElementById('totalBets').textContent=money(G.total_bets||0);
   document.getElementById('prizeAmount').textContent=money(G.prize_amount||0);
+  const homeTotalBets=document.getElementById('homeTotalBets');if(homeTotalBets)homeTotalBets.textContent=money(G.total_bets||0);
+  const homePrizeAmount=document.getElementById('homePrizeAmount');if(homePrizeAmount)homePrizeAmount.textContent=money(G.prize_amount||0);
   // The old Taken Cartelas panel was intentionally removed. Do not write to its
   // deleted DOM nodes: that null assignment stopped cartela rendering and refreshes.
   const last=G.called.length?G.called[G.called.length-1]:null;
@@ -789,6 +788,7 @@ async function refreshGame(){
   for(const n of ownReservations)selectedCartelas.add(n);
   for(const n of [...selectedCartelas])if(!ownReservations.includes(Number(n))&&!pendingCartelas.has(Number(n)))selectedCartelas.delete(n);
   const mine=G.my_cartelas||((G.my_cartela)?[{cartela:G.my_cartela,cartela_number:G.my_cartela_number,stake:0}]:[]);
+  document.getElementById('game').classList.toggle('playing-mode',mine.length>0);
   if(mine.length){
     document.getElementById('selectArea').classList.add('hidden');
     document.getElementById('playing').classList.remove('hidden');
@@ -884,9 +884,9 @@ async function startSelectedGame(){
  const stake=Number(document.getElementById('stake').value||0);
  if(!selectedCartelas.size){msg(t('selectAtLeastOne'),true);return;}
  if(!Number.isFinite(stake)||stake<2||stake>1000){msg(t('minimumBetError'),true);return;}
- const nums=[...selectedCartelas].sort((a,b)=>a-b);
- if(!window.confirm(`Are you sure you want to play with cartela${nums.length>1?'s':''} ${nums.map(n=>'#'+n).join(', ')} for ${money(nums.length*stake)} Birr total?`))return;
- await joinGame(nums,stake);
+ const picked=[...selectedCartelas].sort((a,b)=>a-b);
+ if(!window.confirm((L==='am'?'እርግጠኛ ነዎት? ካርቴላ: ':'Are you sure you want to play with cartela(s): ')+picked.map(n=>'#'+n).join(', ')+'?'))return;
+ await joinGame(picked,stake);
  if((G?.my_cartelas||[]).length)go('game');
 }
 async function joinGame(nums,stake){
@@ -899,6 +899,12 @@ async function joinGame(nums,stake){
  }catch(e){msg(e.message,true);await refreshGame().catch(()=>{});}
  finally{busy=false;if(G&&!(G.my_cartelas||[]).length)renderChoices();}
 }
+async function cancelJoinedCartela(n,stake){
+ if(G?.status!=='waiting'){msg(L==='am'?'ጨዋታው ከተጀመረ በኋላ ካርቴላ መሰረዝ አይቻልም።':'The round has started; this cartela can no longer be cancelled.',true);return;}
+ try{await api('/api/game/release',{method:'POST',body:JSON.stringify({cartela_number:Number(n),stake:Number(stake||2)})});selectedCartelas.delete(Number(n));pendingCartelas.delete(Number(n));choicesRenderKey='';await refreshGame();go('game');msg(L==='am'?'ካርቴላ ተሰርዟል። ሌላ ይምረጡ።':'Cartela cancelled. Choose another cartela.');}
+ catch(e){msg(e.message,true);}
+}
+
 function numberWords(n){
  const ones=['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen'];
  const tens=['','','twenty','thirty','forty','fifty','sixty','seventy'];
@@ -919,7 +925,8 @@ function renderCards(cards,called,wins=[]){
    return `<button type="button" class="cell ${marked?'marked':''} ${!wasCalled?'uncalled':''} ${winSet.has([r,c].join(','))?'win':''}" ${v===0||!called.includes(v)||G.status!=='running'?'disabled':''} onclick="toggleMark(${n},${v})" aria-label="Cartela ${n}, number ${v}">${v===0?'★':v}</button>`;
   })).join('');
   const claimButton=(G.status==='running')?`<button type="button" class="danger wide" style="padding:10px;margin-top:10px" onclick="claim(${n})" ${G.my_suspended?'disabled':''}>${G.my_suspended?(L==='am'?'⛔ በዚህ ዙር ታግደዋል':'⛔ Suspended this round'):'🏆 BINGO! — Cartela #'+n}</button>`:'';
-  return `<div class="my-card-item"><div class="card-caption"><b>${t('cartelaLabel')} #${n}</b><span class="muted">${t('cartelaBet')} ${money(entry.stake||0)}</span></div><div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div><div class="card">${cells}</div>${claimButton}</div>`;
+  const cancelButton=G.status==='waiting'?`<button type="button" class="secondary wide" onclick="cancelJoinedCartela(${n},${Number(entry.stake||document.getElementById('stake')?.value||2)})">${L==='am'?'❌ ካርቴላ ሰርዝ':'❌ Cancel Cartela'}</button>`:'';
+  return `<div class="my-card-item"><div class="card-caption"><b>${t('cartelaLabel')} #${n}</b><span class="muted">${t('cartelaBet')} ${money(entry.stake||0)}</span></div><div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div><div class="card">${cells}</div>${claimButton}${cancelButton}</div>`;
  }).join('');
 }
 function toggleMark(cartela,n){
