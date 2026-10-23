@@ -806,21 +806,21 @@ async function refreshBetCountdowns(){
 async function refreshGame(){
   const lobbyStake=Number(document.getElementById('stake')?.value||2);
   G=await api('/api/game?stake='+encodeURIComponent(Number.isFinite(lobbyStake)&&lobbyStake>=2&&lobbyStake<=1000?lobbyStake:2));
-  document.getElementById('status').textContent=t(G.status);
-  document.getElementById('gameStatus').textContent=t(G.status);
-  document.getElementById('gameId').textContent='#'+G.id;
-  document.getElementById('homePlayers').textContent=G.player_count;
-  document.getElementById('homeCount').textContent=G.player_count;
-  document.getElementById('count').textContent=G.player_count;
-  document.getElementById('homeTimer').textContent='00:'+String(Math.max(0,G.lobby_seconds)).padStart(2,'0');
+  const statusEl=document.getElementById('status');if(statusEl)statusEl.textContent=t(G.status);
+  const gameStatusEl=document.getElementById('gameStatus');if(gameStatusEl)gameStatusEl.textContent=t(G.status);
+  const gameIdEl=document.getElementById('gameId');if(gameIdEl)gameIdEl.textContent='#'+G.id;
+  const homePlayersEl=document.getElementById('homePlayers');if(homePlayersEl)homePlayersEl.textContent=G.player_count;
+  const homeCountEl=document.getElementById('homeCount');if(homeCountEl)homeCountEl.textContent=G.player_count;
+  const countEl=document.getElementById('count');if(countEl)countEl.textContent=G.player_count;
+  const homeTimerEl=document.getElementById('homeTimer');if(homeTimerEl)homeTimerEl.textContent='00:'+String(Math.max(0,G.lobby_seconds)).padStart(2,'0');
   const homeRoundCountdownValue=document.getElementById('homeRoundCountdownValue');if(homeRoundCountdownValue)homeRoundCountdownValue.textContent='00:'+String(Math.max(0,G.lobby_seconds)).padStart(2,'0');
   const homeRoundCountdownLabel=document.getElementById('homeRoundCountdownLabel');if(homeRoundCountdownLabel)homeRoundCountdownLabel.textContent=G.status==='waiting'?(L==='am'?'⏳ ቀጣዩ ዙር የሚጀምረው በ':'⏳ NEXT ROUND STARTS IN'):(L==='am'?'🎮 ጨዋታው እየተካሄደ ነው':'🎮 GAME IN PROGRESS');
   const homeRoundCountdownHint=document.getElementById('homeRoundCountdownHint');if(homeRoundCountdownHint)homeRoundCountdownHint.textContent=G.status==='waiting'?(L==='am'?'ቆጠራው ሲቀጥል ውርርድ እና ካርቴላ ይምረጡ':'Choose your bet and cartela while the countdown is running.'):(L==='am'?'እባክዎ ጨዋታው እስኪያልቅ ይጠብቁ':'Please wait until this game finishes.');
-  document.getElementById('timer').textContent='00:'+String(Math.max(0,G.lobby_seconds)).padStart(2,'0');
-  document.getElementById('homeCalled').textContent=G.called.length+'/75';
-  document.getElementById('calledCount').textContent=G.called.length+'/75';
-  document.getElementById('totalBets').textContent=money(G.prize_amount||0);
-  document.getElementById('prizeAmount').textContent=money(G.prize_amount||0);
+  const timerEl=document.getElementById('timer');if(timerEl)timerEl.textContent='00:'+String(Math.max(0,G.lobby_seconds)).padStart(2,'0');
+  const homeCalledEl=document.getElementById('homeCalled');if(homeCalledEl)homeCalledEl.textContent=G.called.length+'/75';
+  const calledCountEl=document.getElementById('calledCount');if(calledCountEl)calledCountEl.textContent=G.called.length+'/75';
+  const totalBetsEl=document.getElementById('totalBets');if(totalBetsEl)totalBetsEl.textContent=money(G.prize_amount||0);
+  const prizeAmountEl=document.getElementById('prizeAmount');if(prizeAmountEl)prizeAmountEl.textContent=money(G.prize_amount||0);
   const homeTotalBets=document.getElementById('homeTotalBets');if(homeTotalBets)homeTotalBets.textContent=money(G.prize_amount||0);
   const homePrizeAmount=document.getElementById('homePrizeAmount');if(homePrizeAmount)homePrizeAmount.textContent=money(G.prize_amount||0);
   // The old Taken Cartelas panel was intentionally removed. Do not write to its
@@ -830,9 +830,9 @@ async function refreshGame(){
   if(G.status==='waiting'&&G.called.length===0)lastSoundedCount=0;
   const lastNumberEl=document.getElementById('lastNumber');if(lastNumberEl){lastNumberEl.textContent=last===null?'?':String(last);lastNumberEl.setAttribute('aria-label',last===null?t('waitingFirstNumber'):'Current called number '+callLabel(last));}
   const lastLabelEl=document.getElementById('lastLabel');if(lastLabelEl)lastLabelEl.textContent=last===null?t('waitingFirstNumber'):callLabel(last);
-  document.getElementById('allCalled').innerHTML=G.called.slice().reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('')||t('empty');
+  const allCalledEl=document.getElementById('allCalled');if(allCalledEl)allCalledEl.innerHTML=G.called.slice().reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('')||t('empty');
   renderCalloutBoard(G.called);
-  document.getElementById('recent').innerHTML=G.called.slice(-8).reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('');
+  const recentEl=document.getElementById('recent');if(recentEl)recentEl.innerHTML=G.called.slice(-8).reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('');
   // Trigger audio in this same refresh, immediately after updating the visible
   // number, so there is no extra timer delay between the number and its sound.
   if(hasNewCall){if(G.status==='running'&&last!==null)playCallTone(last);lastSoundedCount=G.called.length;}
@@ -840,7 +840,7 @@ async function refreshGame(){
   for(const n of ownReservations)selectedCartelas.add(n);
   for(const n of [...selectedCartelas])if(!ownReservations.includes(Number(n))&&!pendingCartelas.has(Number(n)))selectedCartelas.delete(n);
   const mine=G.my_cartelas||((G.my_cartela)?[{cartela:G.my_cartela,cartela_number:G.my_cartela_number,stake:0}]:[]);
-  document.getElementById('game').classList.toggle('playing-mode',mine.length>0);
+  const gameEl=document.getElementById('game');if(gameEl)gameEl.classList.toggle('playing-mode',mine.length>0);
   const roundMessage=document.getElementById('roundMessage');
   if(roundMessage){roundMessage.textContent=L==='am'?'ጨዋታው ተጀምሯል። እባክዎ በሚቀጥለው ዙር ካርቴላ ይምረጡ።':'The game has started. Please choose a cartela in the next round.';roundMessage.classList.toggle('hidden',!!mine.length||G.status==='waiting'||G.status==='finished');}
   if(mine.length){
