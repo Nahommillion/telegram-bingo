@@ -326,7 +326,7 @@ body:has(#home.active) #brandSubtitle{display:none!important}
 <div class="stat"><span id="homeGameLabel">GAME</span><strong id="gameId">#1</strong></div>
 </div>
 <div class="title"><h3 id="betChooseTitle">Choose Your Bet</h3></div><div class="bet-choice-row"><button class="bet-choice" onclick="chooseHomeBet(2)">2 Birr<small class="bet-round-status" id="betCountdown2">⏳ --:--</small></button><button class="bet-choice" onclick="chooseHomeBet(3)">3 Birr<small class="bet-round-status" id="betCountdown3">⏳ --:--</small></button><button class="bet-choice" onclick="chooseHomeBet(5)">5 Birr<small class="bet-round-status" id="betCountdown5">⏳ --:--</small></button></div>
-<div class="panel home-round-countdown" id="homeRoundCountdown"><div class="muted small" id="homeRoundCountdownLabel">⏳ NEXT ROUND STARTS IN</div><strong id="homeRoundCountdownValue">00:30</strong><div class="muted small" id="homeRoundCountdownHint">Choose your bet and cartela while the countdown is running.</div></div>
+<!-- Removed redundant shared home countdown; each bet has its own countdown above. -->
 <div class="title"><h3 id="quick">Quick Access</h3></div>
 <div class="grid">
 <button class="tile" onclick="go('wallet')"><span class="tile-label"><span class="emoji">💳</span><strong id="depositTile">Deposit Funds</strong></span><small id="depositTileHint">Telebirr • CBE • eBirr</small></button>
@@ -910,6 +910,7 @@ async function refreshGame(){
   }
   const winnerHost=document.getElementById('winnerCartela');
   if(G.winner){
+    if(winnerHost && winnerHost.parentElement !== document.body){ winnerHost.classList.add('winner-overlay'); document.body.appendChild(winnerHost); }
     document.getElementById('claimMsg').textContent='🏆 '+G.winner.name+' '+t('wonWithCartela')+' #'+G.winner.cartela_number+' — '+t('prizeWord')+' '+money(G.winner.prize||0)+'.';
     document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
     if(winnerHost&&Array.isArray(G.winner.cartela)){const marked=new Set((G.winner.pattern||[]).map(x=>x.join(',')));winnerHost.classList.remove('hidden');winnerHost.innerHTML='<div class="winner-celebration"><div class="party">🎉 🎊 🏆 🎊 🎉</div><div>'+(L==='am'?'አሸናፊ!':'WE HAVE A WINNER!')+'</div><div class="winner-name">'+esc(G.winner.name||'Player')+' — '+(L==='am'?'ካርቴላ':'Cartela')+' #'+G.winner.cartela_number+'</div><div class="winner-prize">💰 '+(L==='am'?'ሽልማት':'Prize')+': '+money(G.winner.prize||0)+'</div></div><div class="winner-card"><h4>🏆 '+(L==='am'?'አሸናፊ ካርቴላ':'Winning Cartela')+' #'+G.winner.cartela_number+'</h4><div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div><div class="card">'+G.winner.cartela.flatMap((row,r)=>row.map((v,c)=>'<div class="cell '+(marked.has([r,c].join(','))?'win':'')+'">'+(v===0?'★':v)+'</div>')).join('')+'</div></div>';}
@@ -1267,6 +1268,12 @@ if(tg?.BackButton){
 /* Start the Mini App only after giving Telegram's bridge a moment to load. */
 boot();
 </script>
+<style id="final-winner-viewport-overlay">
+/* Winner message is centered in the viewport, independent of the scrolling game columns. */
+body > #winnerCartela.winner-overlay:not(.hidden){position:fixed!important;left:50%!important;top:50%!important;right:auto!important;bottom:auto!important;transform:translate(-50%,-50%)!important;width:min(90vw,400px)!important;max-width:90vw!important;max-height:85dvh!important;overflow:auto!important;z-index:2147483000!important;margin:0!important;padding:8px!important;box-sizing:border-box!important;background:#071525f5!important;border:1px solid #ffd447!important;border-radius:16px!important;box-shadow:0 18px 70px #000c!important}
+body > #winnerCartela.winner-overlay .winner-celebration{position:relative!important;inset:auto!important;transform:none!important;width:100%!important;max-width:100%!important;margin:0 auto 8px!important;box-sizing:border-box!important}
+body > #winnerCartela.winner-overlay .winner-card{max-width:100%!important;margin:0 auto!important}
+</style>
 </body>
 </html>
 <style id="compact-live-stat-fix">
