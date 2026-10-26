@@ -253,6 +253,25 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 /* Winner announcement appears centered over the game as a compact toast. */
 #game.active #winnerCartela .winner-celebration{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(88vw,390px);max-width:88vw;margin:0;z-index:9999;box-shadow:0 18px 70px #000b;pointer-events:none}
 #game.active #winnerCartela .winner-celebration .party{font-size:22px}
+
+/* Targeted top-bar cleanup: keep the compact game status visible while scrolling. */
+@media (max-width: 900px){
+  body:has(#game.active) .top .brand, body:has(#wallet.active) .top .brand, body:has(#leaderboard.active) .top .brand{display:none!important}
+  #game.active>.title{display:none!important}
+  #game.active>.panel.center{position:sticky!important;top:0!important;z-index:50!important;margin:0!important;padding:5px 5px 4px!important;border-radius:0 0 10px 10px!important;background:#071525!important;box-shadow:0 4px 12px rgba(0,0,0,.28)!important}
+  #game.active .compact-stats{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:3px!important;margin:0 0 3px!important}
+  #game.active .compact-stats .stat{min-width:0!important;padding:3px 2px!important;gap:1px!important}
+  #game.active .compact-stats .stat span{font-size:clamp(8px,2.2vw,10px)!important;line-height:1.05!important;white-space:normal!important}
+  #game.active .compact-stats .stat strong{font-size:clamp(10px,2.8vw,13px)!important;line-height:1.1!important}
+  #game.active #chooseDesc{display:none!important}
+  #game.active #soundToggle{font-size:10px!important;padding:4px 7px!important;margin:2px auto!important;min-height:0!important;line-height:1.1!important}
+  #game.active .called-stat-row{display:none!important}
+  #game.active .game-workspace{margin-top:3px!important}
+}
+/* Remove only the redundant GAME statistic from Home; keep all other home content. */
+#home #homeGameLabel,#home #gameId{display:none!important}
+#home #homeGameLabel{display:none!important}
+
 </style>
 
 <style id="requested-amharic-game-top-and-full-board">
@@ -828,7 +847,7 @@ async function refreshBetCountdowns(){
     const seconds=Math.max(0,Number(state.lobby_seconds)||0);
     el.textContent=(L==='am'?'⏳ ቀጣይ ዙር ':'⏳ NEXT ROUND ')+('00:'+String(seconds).padStart(2,'0'));
    }else{
-    el.textContent=L==='am'?'🎮 በሂደት ላይ':'🎮 IN PROGRESS';
+    el.textContent=L==='am'?'🎮 ጨዋታው ተጀምሯል':'🎮 GAME STARTED';
    }
   }catch(e){el.textContent=L==='am'?'⏳ ቆጠራ':'⏳ ROUND STATUS';}
  }
