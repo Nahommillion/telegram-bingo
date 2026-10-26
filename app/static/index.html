@@ -1291,3 +1291,18 @@ boot();
 }
 </style>
 
+
+<style id="targeted-centered-winner-fixed-game-header">
+/* Targeted layout follow-up: do not change game logic or payment code. */
+#game.active>.panel.center{position:sticky!important;top:0!important;z-index:80!important;margin-top:0!important;padding:5px!important;border-radius:0 0 10px 10px!important;background:#071525f5!important;backdrop-filter:blur(8px);}
+#game.active>.panel.center #chooseDesc{font-size:10px!important;line-height:1.15!important;margin:0 0 3px!important}
+#game.active>.panel.center .compact-stats{margin:2px 0!important;gap:3px!important}
+#game.active>.panel.center .compact-stats .stat{padding:3px 2px!important}
+#game.active>.panel.center .sound-toggle{font-size:10px!important;padding:4px 7px!important;margin:2px auto!important;line-height:1.15!important}
+#game.active .game-workspace .cartela-side #startGameBtn{position:sticky!important;top:0!important;z-index:85!important;box-shadow:0 3px 10px #0008}
+#game.active #winnerCartela{position:fixed!important;left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important;width:min(90vw,400px)!important;max-width:90vw!important;max-height:85dvh!important;overflow:auto!important;z-index:100000!important;margin:0!important;padding:8px!important;background:#071525f5!important;border:1px solid #ffd447!important;border-radius:16px!important;box-shadow:0 18px 70px #000c!important}
+#game.active #winnerCartela .winner-celebration{position:relative!important;inset:auto!important;transform:none!important;width:100%!important;max-width:100%!important;margin:0 auto 8px!important;box-sizing:border-box!important}
+#game.active #winnerCartela .winner-card{max-width:100%!important;margin:0 auto!important}
+#game.active #winnerCartela:not(.hidden){display:block!important}
+@media(max-width:700px){#game.active>.panel.center{padding:4px!important}#game.active>.panel.center .compact-stats .stat span{font-size:8px!important}#game.active>.panel.center .compact-stats .stat strong{font-size:11px!important}}
+</style>
