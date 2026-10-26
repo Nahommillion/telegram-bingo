@@ -243,7 +243,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
  #game.active.playing-mode #playing .my-card-item .cell{font-size:clamp(7px,1.8vw,9px)!important;min-height:17px!important;line-height:1!important}
  #wallet>.title,#leaderboard>.title{margin-top:0!important;padding-top:0!important}
  #wallet,#leaderboard{padding-top:0!important}
- #home>.stats>.stat:not(:first-child){display:none!important}
+ #home>.stats>.stat:first-child{display:none!important}
  #home>#liveTitle,#home>#liveTitle+.panel{display:none!important}
 }
 
@@ -254,6 +254,37 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 #game.active #winnerCartela .winner-celebration{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(88vw,390px);max-width:88vw;margin:0;z-index:9999;box-shadow:0 18px 70px #000b;pointer-events:none}
 #game.active #winnerCartela .winner-celebration .party{font-size:22px}
 </style>
+
+<style id="requested-amharic-game-top-and-full-board">
+/* Home: hide only the redundant Ethiopian subtitle and balance stat. */
+body:has(#home.active) #brandSubtitle{display:none!important}
+#home .stats .stat:has(#balLabel){display:none!important}
+/* Live game: keep only the requested compact top stats and sound control. */
+#game.active>.title,#game.active>.panel.center>#chooseDesc,#game.active .called-stat-row,
+#game.active .compact-stats .stat:has(#totalBets){display:none!important}
+#game.active .compact-stats{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:3px!important;margin:2px 0 4px!important}
+#game.active .compact-stats .stat{padding:4px 2px!important;min-width:0!important}
+#game.active .compact-stats .stat span{font-size:clamp(8px,2vw,10px)!important;line-height:1.05!important}
+#game.active .compact-stats .stat strong{font-size:clamp(10px,2.5vw,13px)!important;line-height:1.1!important}
+#game.active .sound-toggle{font-size:10px!important;padding:5px 7px!important;margin:2px 0!important}
+/* Use the available screen height for the called-number board; only cartelas scroll. */
+#game.active.playing-mode .game-workspace{align-items:stretch!important}
+#game.active.playing-mode .game-workspace .called-side{height:calc(100dvh - 120px)!important;min-height:0!important;overflow:hidden!important}
+#game.active.playing-mode .game-workspace .called-panel{height:100%!important;min-height:0!important;flex:1 1 auto!important;overflow:hidden!important;display:flex!important;padding:2px!important}
+#game.active.playing-mode .game-workspace .callout-board{height:100%!important;min-height:0!important;flex:1 1 auto!important;grid-template-rows:minmax(0,1fr)!important;gap:2px!important;align-items:stretch!important}
+#game.active.playing-mode .game-workspace .call-col{min-height:0!important;display:flex!important;flex-direction:column!important}
+#game.active.playing-mode .game-workspace .call-col-list{flex:1 1 auto!important;min-height:0!important;grid-template-rows:repeat(15,minmax(0,1fr))!important;gap:1px!important;padding:1px!important}
+#game.active.playing-mode .game-workspace .call-num{min-height:0!important;height:auto!important;font-size:clamp(9px,2.3vw,13px)!important;line-height:1!important;padding:0!important}
+#game.active.playing-mode .game-workspace .cartela-side{height:calc(100dvh - 120px)!important;max-height:calc(100dvh - 120px)!important;overflow-y:auto!important;overscroll-behavior:contain!important}
+#game.active.playing-mode #playing .my-card-item .cell{min-height:clamp(13px,2.0dvh,19px)!important;font-size:clamp(7px,1.65vw,10px)!important;line-height:1.05!important}
+#game.active.playing-mode #playing .my-card-item .bhead{font-size:clamp(8px,1.8vw,11px)!important}
+@media(max-width:700px){
+ #game.active.playing-mode .game-workspace{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;gap:3px!important;padding:3px!important}
+ #game.active.playing-mode .game-workspace .called-side,#game.active.playing-mode .game-workspace .cartela-side{width:100%!important;max-width:100%!important;box-sizing:border-box!important}
+ #game.active.playing-mode .game-workspace .called-side,#game.active.playing-mode .game-workspace .cartela-side{height:calc(100dvh - 120px)!important}
+}
+</style>
+
 </head>
 <body>
 <div class="float-bg" aria-hidden="true"><span>🎱</span><span>✦</span><span>●</span><span>🎱</span><span>✦</span><span>●</span><span>🎱</span><span>✦</span><span>●</span><span>🎱</span><span>✧</span><span>●</span></div>
