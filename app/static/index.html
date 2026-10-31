@@ -82,7 +82,7 @@ body{margin:0;background:radial-gradient(ellipse at 50% -10%,#175443,var(--bg) 6
 .cell.win{background:#ffd447!important;color:#201800;box-shadow:0 0 0 2px white,0 0 14px #ffd447}
 .number{width:min(100%,300px);height:118px;margin:12px auto 10px;border-radius:18px;display:grid;place-items:center;background:linear-gradient(135deg,#12394b,#0b2535 55%,#075c54);border:2px solid #2edbb3;box-shadow:0 0 0 3px #13c87922,0 8px 24px #0005;color:#fff;font-size:clamp(64px,17vw,94px);letter-spacing:1px;font-weight:1000;text-shadow:0 3px 0 #0005;animation:none}
 .home-profile{display:flex;align-items:center;gap:13px;margin:12px 0 14px;padding:15px;border-radius:18px;background:linear-gradient(125deg,#13566a,#123c50);border:1px solid #287487;box-shadow:0 8px 22px #0003}.home-avatar{width:66px;height:66px;flex:0 0 66px;border-radius:50%;object-fit:cover;border:3px solid #20e5b2;background:#0a2839}.home-profile-main{min-width:0;flex:1}.home-profile-name{font-size:19px;font-weight:900;overflow-wrap:anywhere}.home-profile-phone{display:inline-block;margin-top:4px;padding:4px 9px;border-radius:16px;background:#1b667b;color:#d8f7ff;font-size:13px}.home-profile-balance{padding:9px 11px;border:1px solid #2c8799;border-radius:13px;text-align:center;background:#105066;white-space:nowrap}.home-profile-balance strong{display:block;font-size:18px;color:#fff}.home-profile-balance small{color:#a9f3ff;font-weight:800}.home-profile .profile-greeting{margin-top:9px;padding:8px;border-radius:10px;background:#2a6655;color:#fff2a8;font-size:12px;font-weight:800;text-align:center;grid-column:1/-1}.home-profile-wrap{display:grid;grid-template-columns:66px minmax(0,1fr) auto;align-items:center;gap:12px}.home-profile-wrap .profile-greeting{grid-column:1/-1}
-.bet-choice-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}.bet-choice{padding:15px 5px;border-radius:14px;border:1px solid #31d9ad;background:linear-gradient(135deg,#35d99b,#16b8c8);color:#052b2b;font-size:18px;font-weight:1000;box-shadow:0 5px 16px #0003}.bet-choice:active{transform:scale(.98)}.bet-round-status{display:block;margin-top:5px;font-size:10px;line-height:1.15;font-weight:800;white-space:normal}.callout-board{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;margin:12px 0}.call-col{background:#0a1e2c;border:1px solid #284c60;border-radius:10px;overflow:hidden}.call-col-head{padding:8px 2px;text-align:center;color:#071525;font-weight:1000;font-size:18px}.call-col:nth-child(1) .call-col-head{background:#e94b62}.call-col:nth-child(2) .call-col-head{background:#2ca7f2}.call-col:nth-child(3) .call-col-head{background:#20c77a}.call-col:nth-child(4) .call-col-head{background:#f5c542}.call-col:nth-child(5) .call-col-head{background:#a76be8}.call-col-list{display:grid;grid-template-columns:1fr;gap:3px;padding:4px}.call-num{min-height:25px;display:grid;place-items:center;border-radius:5px;background:#172e3e;color:#c5d2dc;font-weight:800;font-size:12px}.call-num.called{color:#071525;background:#ffd447;box-shadow:0 0 8px #ffd44766}.call-col:nth-child(1) .call-num.called{background:#ff6a7d}.call-col:nth-child(2) .call-num.called{background:#55c3ff}.call-col:nth-child(3) .call-num.called{background:#3ce59b}.call-col:nth-child(4) .call-num.called{background:#ffe16b}.call-col:nth-child(5) .call-num.called{background:#c99aff}.chips{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0}
+.bet-choice-row{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin:14px 0}.bet-choice{padding:15px 5px;border-radius:14px;border:1px solid #31d9ad;background:linear-gradient(135deg,#35d99b,#16b8c8);color:#052b2b;font-size:18px;font-weight:1000;box-shadow:0 5px 16px #0003}.bet-choice:active{transform:scale(.98)}.bet-round-status{display:block;margin-top:5px;font-size:10px;line-height:1.15;font-weight:800;white-space:normal}.callout-board{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;margin:12px 0}.call-col{background:#0a1e2c;border:1px solid #284c60;border-radius:10px;overflow:hidden}.call-col-head{padding:8px 2px;text-align:center;color:#071525;font-weight:1000;font-size:18px}.call-col:nth-child(1) .call-col-head{background:#e94b62}.call-col:nth-child(2) .call-col-head{background:#2ca7f2}.call-col:nth-child(3) .call-col-head{background:#20c77a}.call-col:nth-child(4) .call-col-head{background:#f5c542}.call-col:nth-child(5) .call-col-head{background:#a76be8}.call-col-list{display:grid;grid-template-columns:1fr;gap:3px;padding:4px}.call-num{min-height:25px;display:grid;place-items:center;border-radius:5px;background:#172e3e;color:#c5d2dc;font-weight:800;font-size:12px}.call-num.called{color:#071525;background:#ffd447;box-shadow:0 0 8px #ffd44766}.call-col:nth-child(1) .call-num.called{background:#ff6a7d}.call-col:nth-child(2) .call-num.called{background:#55c3ff}.call-col:nth-child(3) .call-num.called{background:#3ce59b}.call-col:nth-child(4) .call-num.called{background:#ffe16b}.call-col:nth-child(5) .call-num.called{background:#c99aff}.chips{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0}
 .chip{background:#17394c;border:1px solid #2a5b6c;border-radius:20px;padding:5px 8px;font-size:12px}
 .notice{background:#123c32;border:1px solid #22795d;color:#c8ffe8;border-radius:12px;padding:11px;margin:10px 0;font-size:13px}
 .err{background:#4a2029;border-color:#8c3947;color:#ffd9df}
@@ -272,6 +272,14 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 #home #homeGameLabel,#home #gameId{display:none!important}
 #home #homeGameLabel{display:none!important}
 
+
+/* Active-round controls replace the standard bottom navigation only while a player has joined. */
+.active-game-controls{display:none;position:fixed;left:0;right:0;bottom:0;z-index:120;background:#071525;border-top:1px solid #29465b;padding:8px max(10px,env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));gap:8px;grid-template-columns:1fr 1fr 1.25fr;box-shadow:0 -5px 18px #0007}
+.active-game-controls button{min-width:0;padding:11px 5px;font-weight:800;border-radius:10px}
+body:has(#game.active.playing-mode) .bottom{display:none!important}
+body:has(#game.active.playing-mode) .active-game-controls{display:grid}
+body:has(#game.active.playing-mode) #game{padding-bottom:78px!important}
+
 </style>
 
 <style id="requested-amharic-game-top-and-full-board">
@@ -327,13 +335,7 @@ body:has(#home.active) #brandSubtitle{display:none!important}
 </div>
 <div class="title"><h3 id="betChooseTitle">Choose Your Bet</h3></div><div class="bet-choice-row"><button class="bet-choice" onclick="chooseHomeBet(2)">2 Birr<small class="bet-round-status" id="betCountdown2">⏳ --:--</small></button><button class="bet-choice" onclick="chooseHomeBet(3)">3 Birr<small class="bet-round-status" id="betCountdown3">⏳ --:--</small></button><button class="bet-choice" onclick="chooseHomeBet(5)">5 Birr<small class="bet-round-status" id="betCountdown5">⏳ --:--</small></button></div>
 <!-- Removed redundant shared home countdown; each bet has its own countdown above. -->
-<div class="title"><h3 id="quick">Quick Access</h3></div>
-<div class="grid">
-<button class="tile" onclick="go('wallet')"><span class="tile-label"><span class="emoji">💳</span><strong id="depositTile">Deposit Funds</strong></span><small id="depositTileHint">Telebirr • CBE • eBirr</small></button>
-<button class="tile" onclick="go('wallet')"><span class="tile-label"><span class="emoji">💰</span><strong id="walletTile">My Wallet</strong></span><small id="walletTileHint">Balance & history</small></button>
-<button class="tile" onclick="go('leaderboard')"><span class="tile-label"><span class="emoji">🏆</span><strong id="leaderTile">Leaderboard</strong></span><small id="leaderTileHint">Top players</small></button>
-
-</div>
+<!-- Home Quick Access shortcuts removed as requested. -->
 <!-- Removed redundant home live-game status panel; per-bet countdowns remain above. -->
 </section>
 
@@ -453,6 +455,11 @@ body:has(#home.active) #brandSubtitle{display:none!important}
 <button class="nav" data-tab="leaderboard" onclick="go('leaderboard')"><span>🏆</span><b id="navLeaders">Leaders</b></button>
 
 </nav>
+<div id="activeGameControls" class="active-game-controls" aria-label="Active game controls">
+ <button type="button" class="secondary" onclick="go('home')">↩ Leave</button>
+ <button type="button" class="secondary" onclick="refreshGame().catch(e=>msg(e.message,true))">↻ Refresh</button>
+ <button type="button" class="danger" id="activeBingoBtn" onclick="claimActiveCartela()">🏆 BINGO!</button>
+</div>
 
 <script>
 /*
@@ -1042,6 +1049,12 @@ function toggleMark(cartela,n){
  if(marks.has(n))marks.delete(n);else marks.add(n);
  renderCards(G.my_cartelas||[],G.called,winCells);
 }
+async function claimActiveCartela(){
+ const cards=G?.my_cartelas||((G?.my_cartela)?[{cartela_number:G.my_cartela_number}]:[]);
+ if(!cards.length){msg(L==='am'?'ካርቴላ አልተመረጠም':'No joined cartela to claim',true);return;}
+ // Keep the existing server-side claim path and pass the exact cartela number.
+ await claim(Number(cards[0].cartela_number));
+}
 async function claim(cartela){
  try{
   const marks=manualMarksByCard[Number(cartela)]||new Set([0]);
@@ -1312,4 +1325,45 @@ body > #winnerCartela.winner-overlay .winner-card{max-width:100%!important;margi
 #game.active #winnerCartela .winner-card{max-width:100%!important;margin:0 auto!important}
 #game.active #winnerCartela:not(.hidden){display:block!important}
 @media(max-width:700px){#game.active>.panel.center{padding:4px!important}#game.active>.panel.center .compact-stats .stat span{font-size:8px!important}#game.active>.panel.center .compact-stats .stat strong{font-size:11px!important}}
+</style>
+
+<style id="final-complete-live-game-layout">
+/* Final responsive live-game layout. Presentation-only; existing game/payment handlers remain intact. */
+@media(max-width:700px){
+ body:has(#game.active.playing-mode) .wrap{padding:0 0 calc(76px + env(safe-area-inset-bottom))!important;}
+ body:has(#game.active.playing-mode) .top{display:none!important}
+ #game.active.playing-mode{margin:0!important;padding:0!important;min-height:100dvh!important;}
+ #game.active.playing-mode>.panel.center{position:sticky!important;top:0!important;z-index:90!important;border-radius:0 0 9px 9px!important;margin:0!important;padding:4px 6px!important;}
+ #game.active.playing-mode>.panel.center .compact-stats{grid-template-columns:repeat(3,minmax(0,1fr))!important;}
+ #game.active.playing-mode>.panel.center .compact-stats .stat{padding:3px 2px!important;}
+ #game.active.playing-mode>.panel.center .compact-stats .stat span{font-size:clamp(8px,2.1vw,10px)!important;}
+ #game.active.playing-mode>.panel.center .compact-stats .stat strong{font-size:clamp(10px,2.8vw,14px)!important;white-space:nowrap!important;}
+ #game.active.playing-mode .game-workspace{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;gap:4px!important;padding:4px!important;margin:0!important;width:100%!important;box-sizing:border-box!important;}
+ #game.active.playing-mode .game-workspace .called-side{height:calc(100dvh - 126px - env(safe-area-inset-bottom))!important;min-height:0!important;display:flex!important;flex-direction:column!important;overflow:hidden!important;}
+ #game.active.playing-mode .game-workspace .called-side>.title{margin:3px 1px!important;}
+ #game.active.playing-mode .game-workspace .called-side>.title h3{font-size:clamp(10px,2.7vw,13px)!important;}
+ #game.active.playing-mode .game-workspace .called-panel{height:100%!important;min-height:0!important;flex:1!important;overflow:hidden!important;padding:2px!important;}
+ #game.active.playing-mode .game-workspace .callout-board{height:100%!important;display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;grid-template-rows:minmax(0,1fr)!important;gap:2px!important;margin:0!important;}
+ #game.active.playing-mode .game-workspace .call-col{display:flex!important;flex-direction:column!important;min-width:0!important;min-height:0!important;}
+ #game.active.playing-mode .game-workspace .call-col-head{font-size:clamp(9px,2.6vw,12px)!important;padding:4px 0!important;flex:0 0 auto!important;}
+ #game.active.playing-mode .game-workspace .call-col-list{display:grid!important;grid-template-rows:repeat(15,minmax(0,1fr))!important;gap:1px!important;flex:1!important;min-height:0!important;padding:1px!important;}
+ #game.active.playing-mode .game-workspace .call-num{min-height:0!important;height:auto!important;padding:0!important;font-size:clamp(7px,2vw,10px)!important;line-height:1!important;border-radius:2px!important;}
+ #game.active.playing-mode .game-workspace .cartela-side{height:calc(100dvh - 126px - env(safe-area-inset-bottom))!important;max-height:none!important;min-width:0!important;overflow-y:auto!important;overscroll-behavior:contain!important;padding:0 0 5px!important;}
+ #game.active.playing-mode #playing{margin:0!important;padding:0!important;}
+ #game.active.playing-mode #playing>.title{margin:3px 0 5px!important;gap:3px!important;}
+ #game.active.playing-mode #playing>.title h3{font-size:clamp(10px,2.7vw,13px)!important;}
+ #game.active.playing-mode #playing>.panel{padding:3px!important;margin:0!important;}
+ #game.active.playing-mode #playing #myCards{display:grid!important;grid-template-columns:minmax(0,1fr)!important;gap:4px!important;}
+ #game.active.playing-mode #playing .my-card-item{width:100%!important;max-width:100%!important;min-width:0!important;margin:0!important;padding:2px!important;box-sizing:border-box!important;}
+ #game.active.playing-mode #playing .my-card-item .card{width:100%!important;display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:1px!important;padding:1px!important;}
+ #game.active.playing-mode #playing .my-card-item .cell{min-width:0!important;min-height:clamp(13px,2.3dvh,20px)!important;padding:0!important;font-size:clamp(6px,1.7vw,9px)!important;line-height:1!important;box-sizing:border-box!important;}
+ #game.active.playing-mode #playing .my-card-item .bhead{font-size:clamp(8px,2vw,11px)!important;padding:1px 0!important;}
+ #game.active.playing-mode #playing .my-card-item .card-caption{font-size:9px!important;margin:2px 0!important;}
+ #game.active.playing-mode #activeGameControls{padding:7px 8px calc(7px + env(safe-area-inset-bottom))!important;gap:6px!important;grid-template-columns:1fr 1fr 1.2fr!important;}
+ #game.active.playing-mode #activeGameControls button{font-size:clamp(11px,3vw,14px)!important;padding:10px 3px!important;min-height:42px!important;}
+}
+@media(min-width:701px){
+ #game.active.playing-mode .game-workspace{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;align-items:stretch!important;}
+ #game.active.playing-mode .game-workspace .called-side,#game.active.playing-mode .game-workspace .cartela-side{height:calc(100vh - 180px)!important;overflow:auto!important;}
+}
 </style>
