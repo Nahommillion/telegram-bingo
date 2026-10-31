@@ -1395,3 +1395,29 @@ body > #winnerCartela.winner-overlay .winner-card{max-width:100%!important;margi
  #game.active.playing-mode .game-workspace .called-side,#game.active.playing-mode .game-workspace .cartela-side{height:calc(100vh - 180px)!important;overflow:auto!important;}
 }
 </style>
+<style id="selection-screen-separated-from-live-game">
+/* Selection is its own screen state: all 200 choices use the upper half,
+   and the player's reserved cartelas/selection summary sit underneath. */
+#game.active:not(.playing-mode) .game-workspace{display:block!important;grid-template-columns:minmax(0,1fr)!important;padding:5px!important}
+#game.active:not(.playing-mode) .game-workspace .called-side{display:none!important}
+#game.active:not(.playing-mode) .game-workspace .cartela-side{display:block!important;width:100%!important;grid-column:1/-1!important;max-height:none!important;overflow:visible!important;padding:0 0 12px!important}
+#game.active:not(.playing-mode) #selectArea{display:block!important}
+#game.active:not(.playing-mode) #selectArea>.title{margin:4px 2px 6px!important}
+#game.active:not(.playing-mode) #selectArea>.panel{padding:7px!important}
+#game.active:not(.playing-mode) #selectArea .cardgrid{display:grid!important;grid-template-columns:repeat(10,minmax(0,1fr))!important;gap:3px!important;max-height:50vh!important;max-height:50dvh!important;overflow-y:auto!important;overscroll-behavior:contain!important;padding:3px!important}
+#game.active:not(.playing-mode) #selectArea .pick{min-width:0!important;min-height:clamp(27px,5.2vw,40px)!important;padding:3px 1px!important;font-size:clamp(10px,2.6vw,14px)!important;border-radius:6px!important}
+#game.active:not(.playing-mode) #selectArea .selection-summary{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:8px!important;margin:8px 2px 2px!important;padding:9px!important;border:1px solid #31576b!important;border-radius:9px!important;background:#0b2032!important;color:#fff!important;font-size:12px!important}
+#game.active:not(.playing-mode) #selectArea #selectedCartelaLabel{display:block!important;text-align:right!important;white-space:normal!important;overflow-wrap:anywhere!important;color:#ffd447!important;font-weight:900!important}
+#game.active:not(.playing-mode) #selectArea #cartelaSearch{display:block!important;margin:5px 0!important}
+#game.active:not(.playing-mode) #selectArea #stake,#game.active:not(.playing-mode) #selectArea #stakeLabel{display:none!important}
+#game.active:not(.playing-mode) #selectArea #betSummary{display:block!important;margin:5px 2px!important;font-size:11px!important}
+#game.active:not(.playing-mode) #selectArea #startGameBtn,#game.active:not(.playing-mode) #selectArea .danger{display:inline-flex!important;width:calc(50% - 4px)!important;min-height:40px!important;margin:6px 2px!important;justify-content:center!important;align-items:center!important}
+/* Persistent B-I-N-G-O column colors for every called number, not only the latest. */
+#game .call-col:nth-child(1) .call-num.called{background:#ff6a7d!important;color:#071525!important;border-color:#ffc0c8!important}
+#game .call-col:nth-child(2) .call-num.called{background:#55c3ff!important;color:#071525!important;border-color:#b8e8ff!important}
+#game .call-col:nth-child(3) .call-num.called{background:#3ce59b!important;color:#071525!important;border-color:#b5ffdb!important}
+#game .call-col:nth-child(4) .call-num.called{background:#ffe16b!important;color:#071525!important;border-color:#fff2b0!important}
+#game .call-col:nth-child(5) .call-num.called{background:#c99aff!important;color:#071525!important;border-color:#e8d2ff!important}
+#game .call-col .call-num.current-call{outline:2px solid #fff!important;outline-offset:-2px!important;filter:brightness(1.12)!important}
+@media(max-width:420px){#game.active:not(.playing-mode) #selectArea .cardgrid{grid-template-columns:repeat(10,minmax(0,1fr))!important;gap:2px!important;padding:2px!important}#game.active:not(.playing-mode) #selectArea .pick{min-height:clamp(25px,7vw,32px)!important;font-size:10px!important;padding:2px 0!important}#game.active:not(.playing-mode) #selectArea>.panel{padding:5px!important}}
+</style>
