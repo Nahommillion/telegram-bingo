@@ -171,7 +171,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 .game-workspace .call-num{min-height:22px;font-size:11px}
 .game-workspace #availableCartelasTitle{font-size:15px}
 .game-workspace #chooseCard{font-size:14px}
-.game-workspace #cartelaSearch,.game-workspace #stake,.game-workspace #stakeLabel,.game-workspace #betSummary,.game-workspace #selectedLabel,.game-workspace #selectedCartelaLabel{display:none!important}
+.game-workspace .game-workspace #stake,.game-workspace #stakeLabel,.game-workspace #betSummary,.game-workspace #selectedLabel,.game-workspace #selectedCartelaLabel{display:none!important}
 .game-workspace .selection-summary{display:none!important}
 .game-workspace .cardgrid{grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
 .game-workspace .pick{padding:7px 1px;min-width:0}
@@ -206,7 +206,7 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 #game.active .game-workspace .cartela-side .panel{padding:5px!important;border-radius:8px!important}
 #game.active .game-workspace #chooseCard{font-size:11px!important}
 #game.active .game-workspace #cartelaHelp{font-size:9px!important;line-height:1.2!important;margin:3px 0!important}
-#game.active .game-workspace #cartelaSearch,#game.active .game-workspace #stake,#game.active .game-workspace #stakeLabel,#game.active .game-workspace #betSummary,#game.active .game-workspace #selectedLabel,#game.active .game-workspace #selectedCartelaLabel,#game.active .game-workspace .selection-summary{display:none!important}
+#game.active .game-workspace #game.active .game-workspace #stake,#game.active .game-workspace #stakeLabel,#game.active .game-workspace #betSummary,#game.active .game-workspace #selectedLabel,#game.active .game-workspace #selectedCartelaLabel,#game.active .game-workspace .selection-summary{display:none!important}
 #game.active .game-workspace .cardgrid{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:3px!important;max-height:none!important;overflow:visible!important;padding:1px!important}
 #game.active .game-workspace .pick{min-width:0!important;min-height:31px!important;padding:4px 1px!important;font-size:10px!important;border-radius:5px!important}
 #game.active .game-workspace #startGameBtn,#game.active .game-workspace .cartela-side .secondary{font-size:11px!important;padding:8px 4px!important;margin-top:5px!important;border-radius:8px!important}
@@ -312,6 +312,16 @@ body:has(#home.active) #brandSubtitle{display:none!important}
 }
 </style>
 
+<style>
+.selected-cartela-previews{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-top:12px}
+.selected-preview{background:#102b40;border:1px solid #ffd44788;border-radius:12px;padding:8px;min-width:0}
+.selected-preview .card-caption{font-weight:900;color:#ffd447}
+.selected-preview .bhead,.selected-preview .card{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:3px;text-align:center}
+.selected-preview .bhead span{padding:4px 0;border-radius:4px;background:#ffd447;color:#142333;font-weight:1000}
+.selected-preview .cell{min-width:0;aspect-ratio:1;display:grid;place-items:center;background:#fff;color:#142333;border-radius:4px;font-weight:900;font-size:clamp(10px,2.5vw,14px)}
+.selected-preview .cell.free{background:#20d78a}
+</style>
+
 </head>
 <body>
 <div class="float-bg" aria-hidden="true"><span>🎱</span><span>✦</span><span>●</span><span>🎱</span><span>✦</span><span>●</span><span>🎱</span><span>✦</span><span>●</span><span>🎱</span><span>✧</span><span>●</span></div>
@@ -319,7 +329,7 @@ body:has(#home.active) #brandSubtitle{display:none!important}
 <div class="wrap">
 <header class="top">
 <div class="brand"><div class="mark"><img src="/static/Goferehabesha.jpg" alt="Goferehabesha Cartela Bingo logo"></div><div><h1 id="brandName">Goferehabesha Cartela Bingo</h1><small class="muted" id="brandSubtitle">🇪🇹 Ethiopian Bingo • ቢንጎ</small></div></div>
-<button class="lang" onclick="toggleLang()" id="langBtn">አማ / EN</button>
+
 </header>
 <div id="notice" class="notice hidden"></div>
 
@@ -357,15 +367,15 @@ body:has(#home.active) #brandSubtitle{display:none!important}
 <div id="selectArea">
  <div class="title"><h3 id="availableCartelasTitle">🟢 Available Cartelas</h3><span class="muted small" id="availableCount">200 available</span></div>
  <div class="panel">
-  <div class="title" style="margin-top:0"><h3 id="chooseCard">Choose Your Cartela (1–200)</h3></div>
   <p class="muted small" id="cartelaHelp">Tap green cartelas to select them. Dim black cartelas are already taken. Your selections are reserved instantly while you prepare your bet.</p>
-  <input id="cartelaSearch" class="field" type="number" min="1" max="200" placeholder="Find cartela number (1–200)" oninput="renderChoices()">
+
   <label class="small muted" id="stakeLabel">Bet per cartela (minimum 2 Birr)</label>
   <input id="stake" class="field" type="number" min="2" max="1000" step="0.01" value="2" oninput="updateSelectionSummary()" onchange="changeStakeLobby()">
   <div class="muted small" id="betSummary">Select cartelas to calculate your total bet.</div>
   <button class="primary" id="startGameBtn" onclick="startSelectedGame()" disabled>🎮 Start Game</button><button class="danger wide" type="button" onclick="cancelCartelaSelection()">✖ Cancel selection</button>
   <div class="cardgrid" id="choices"></div>
   <div class="selection-summary"><span id="selectedLabel">Selected cartela</span><strong id="selectedCartelaLabel">None</strong></div>
+  <div id="selectedCartelaPreviews" class="selected-cartela-previews"></div>
  </div>
 </div>
 <div id="playing" class="hidden">
@@ -444,7 +454,7 @@ body:has(#home.active) #brandSubtitle{display:none!important}
 <section class="screen" id="profile">
 <div class="title"><h3 id="profileTitle">Player Profile</h3></div>
 <div class="title"><h3 id="settings">Settings</h3></div>
-<div class="panel"><div class="row"><span data-en="🌐 Language" data-am="🌐 ቋንቋ">🌐 Language / ቋንቋ</span><button class="secondary" onclick="toggleLang()" data-en="English / አማርኛ" data-am="እንግሊዝኛ / አማርኛ">English / አማርኛ</button></div><div class="row"><span data-en="🆘 Support" data-am="🆘 ድጋፍ">🆘 Support</span><span class="muted small" data-en="Contact admin" data-am="አስተዳዳሪውን ያነጋግሩ">Contact admin</span></div><div class="row"><span data-en="👥 Referrals" data-am="👥 ግብዣዎች">👥 Referrals</span><span class="pill" id="refCount">0</span></div></div>
+<div class="panel"><div class="row"><span data-en="🆘 Support" data-am="🆘 ድጋፍ">🆘 Support</span><span class="muted small" data-en="Contact admin" data-am="አስተዳዳሪውን ያነጋግሩ">Contact admin</span></div><div class="row"><span data-en="👥 Referrals" data-am="👥 ግብዣዎች">👥 Referrals</span><span class="pill" id="refCount">0</span></div></div>
 </section>
 </div>
 
@@ -930,6 +940,26 @@ function cartelasTakenByOthers(){
  (G?.reservations||[]).forEach(r=>{if(Number(r.telegram_id)!==mine)taken.add(Number(r.cartela_number));});
  return taken;
 }
+
+function cartelaForNumber(number){
+ let seed=Number(number)>>>0;
+ const random=()=>{seed=(Math.imul(1664525,seed)+1013904223)>>>0;return seed/4294967296;};
+ const cols=[[1,15],[16,30],[31,45],[46,60],[61,75]].map(([lo,hi])=>{
+  const a=Array.from({length:hi-lo+1},(_,i)=>lo+i);
+  for(let i=a.length-1;i>0;i--){const j=Math.floor(random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
+  return a.slice(0,5);
+ });
+ const card=Array.from({length:5},(_,r)=>cols.map(col=>col[r]));
+ card[2][2]=0;return card;
+}
+function renderSelectedCartelaPreviews(){
+ const host=document.getElementById('selectedCartelaPreviews');if(!host)return;
+ const nums=[...selectedCartelas].sort((a,b)=>a-b);
+ host.innerHTML=nums.map(n=>{
+  const card=cartelaForNumber(n);
+  return `<div class="selected-preview"><div class="card-caption">Cartela #${n}</div><div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div><div class="card">${card.flat().map(v=>`<div class="cell ${v===0?'free':''}">${v===0?'★':v}</div>`).join('')}</div></div>`;
+ }).join('');
+}
 function renderChoices(){
  const requiredBet=Number(document.getElementById('stake')?.value||2);
  const funded=availableWalletBalance>=requiredBet&&requiredBet>=2&&requiredBet<=1000;
@@ -937,15 +967,15 @@ function renderChoices(){
  if(fundingNotice)fundingNotice.classList.toggle('hidden',funded||!!(G?.my_cartelas||[]).length);
  const selectArea=document.getElementById('selectArea');
  if(selectArea)selectArea.classList.toggle('hidden',!funded||!!(G?.my_cartelas||[]).length);
- if(!funded){selectedCartelas.clear();pendingCartelas.clear();choicesRenderKey='';const choices=document.getElementById('choices');if(choices)choices.innerHTML='';const count=document.getElementById('availableCount');if(count)count.textContent='—';const start=document.getElementById('startGameBtn');if(start)start.disabled=true;return;}
+ if(!funded){selectedCartelas.clear();pendingCartelas.clear();choicesRenderKey='';const choices=document.getElementById('choices');if(choices)choices.innerHTML='';renderSelectedCartelaPreviews();const count=document.getElementById('availableCount');if(count)count.textContent='—';const start=document.getElementById('startGameBtn');if(start)start.disabled=true;return;}
  const taken=cartelasTakenByOthers();
- const q=Number(document.getElementById('cartelaSearch')?.value||0);let available=0;
+ let available=0;
  for(let n=1;n<=200;n++)if(!taken.has(n))available++;
- const key=[G?.status||'',q,[...taken].sort((a,b)=>a-b).join(','),[...selectedCartelas].sort((a,b)=>a-b).join(','),[...pendingCartelas].sort((a,b)=>a-b).join(',')].join('|');
+ const key=[G?.status||'',[...taken].sort((a,b)=>a-b).join(','),[...selectedCartelas].sort((a,b)=>a-b).join(','),[...pendingCartelas].sort((a,b)=>a-b).join(',')].join('|');
  if(key!==choicesRenderKey){
   let h='';
   for(let n=1;n<=200;n++){
-   const used=taken.has(n),pending=pendingCartelas.has(n),roundLocked=G?.status!=='waiting';if(q&&n!==q)continue;
+   const used=taken.has(n),pending=pendingCartelas.has(n),roundLocked=G?.status!=='waiting';
    h+=`<button type="button" class="pick ${used?'taken':''} ${selectedCartelas.has(n)?'selected':''} ${pending?'pending':''} ${roundLocked?'round-locked':''}" ${used||pending||roundLocked?'disabled':''} aria-label="Cartela ${n}${used?' taken':selectedCartelas.has(n)?' selected':' available'}" onclick="selectCartela(${n})">${n}</button>`;
   }
   document.getElementById('choices').innerHTML=h||`<div class="muted small">${t('noCartelaMatch')}</div>`;
@@ -953,6 +983,7 @@ function renderChoices(){
  }
  document.getElementById('availableCount').textContent=available+' '+t('availableSuffix');
  updateSelectionSummary();
+ renderSelectedCartelaPreviews();
  document.getElementById('startGameBtn').disabled=!selectedCartelas.size||[...selectedCartelas].some(n=>taken.has(n)||pendingCartelas.has(n))||G?.status!=='waiting'||busy;
  if(G?.status!=='waiting'&&!((G?.my_cartelas||[]).length)){const help=document.getElementById('cartelaHelp');if(help)help.textContent=L==='am'?'ጨዋታው ተጀምሯል። ካርቴላዎችን ማየት ይችላሉ፤ መምረጥ ግን ከዙሩ በኋላ ብቻ ነው።':'The game has already started. You can view cartelas, but please choose one after this round finishes.';}else{const help=document.getElementById('cartelaHelp');if(help)help.textContent=t('cartelaHelp');}
 }
@@ -1421,3 +1452,4 @@ body > #winnerCartela.winner-overlay .winner-card{max-width:100%!important;margi
 #game .call-col .call-num.current-call{outline:2px solid #fff!important;outline-offset:-2px!important;filter:brightness(1.12)!important}
 @media(max-width:420px){#game.active:not(.playing-mode) #selectArea .cardgrid{grid-template-columns:repeat(10,minmax(0,1fr))!important;gap:2px!important;padding:2px!important}#game.active:not(.playing-mode) #selectArea .pick{min-height:clamp(25px,7vw,32px)!important;font-size:10px!important;padding:2px 0!important}#game.active:not(.playing-mode) #selectArea>.panel{padding:5px!important}}
 </style>
+
