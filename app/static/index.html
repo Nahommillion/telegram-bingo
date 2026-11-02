@@ -391,6 +391,7 @@ body:has(#game.active.playing-mode){overflow:hidden!important;height:100dvh!impo
   <div id="selectedCardPreviews" class="selected-card-previews"></div>
   <div class="selection-summary"><span id="selectedLabel">Selected cartela</span><strong id="selectedCartelaLabel">None</strong></div>
  </div>
+ <div id="reservationPanel" class="reservation-panel hidden"><div class="reservation-title">🎟️ Cartela reserved</div><div id="reservationCartelas" class="reservation-cartelas"></div><div class="countdown-ring" id="reservationRing"><div><strong id="reservationSeconds">30</strong><small>SECONDS</small></div></div><p id="reservationCountdownText">Your game starts when the countdown ends.</p><div class="reservation-actions"><button type="button" class="danger" onclick="cancelReservationFromSelection()">✖ Cancel Cartela</button><button type="button" class="primary" onclick="continueToLiveGame()">▶ Continue</button></div></div>
 </div>
 <div id="playing" class="hidden">
  <div class="title"><h3 id="yourCard">Your Cartela</h3><span class="pill" id="cardNum"></span></div>
@@ -468,7 +469,7 @@ body:has(#game.active.playing-mode){overflow:hidden!important;height:100dvh!impo
 <section class="screen" id="profile">
 <div class="title"><h3 id="profileTitle">Player Profile</h3></div>
 <div class="title"><h3 id="settings">Settings</h3></div>
-<div class="panel"><div class="row"><span data-en="🌐 Language" data-am="🌐 ቋንቋ">🌐 Language / ቋንቋ</span><button class="secondary" onclick="toggleLang()" data-en="English / አማርኛ" data-am="እንግሊዝኛ / አማርኛ">English / አማርኛ</button></div><button type="button" class="row support-trigger" onclick="toggleSupportContacts()" aria-expanded="false"><span data-en="🆘 Support" data-am="🆘 ድጋፍ">🆘 Support</span><span class="muted small" id="supportToggleHint" data-en="Tap to view contacts" data-am="ለማየት ይጫኑ">Tap to view contacts ▾</span></button><div class="support-links hidden" id="supportContacts"><b>📞 Support & Community</b><p class="muted small">Telebirr support: use the verified receiving account shown in Wallet → Deposit. Never send money to an unverified number.</p><a href="https://t.me/Gofere_Habesha_Bingo" target="_blank" rel="noopener">📢 Telegram Channel</a><a href="https://t.me/Goferehabeshabingo" target="_blank" rel="noopener">👥 Telegram Group</a></div><div class="row"><span data-en="👥 Referrals" data-am="👥 ግብዣዎች">👥 Referrals</span><span class="pill" id="refCount">0</span></div></div>
+<div class="panel"><div class="row"><span data-en="🌐 Language" data-am="🌐 ቋንቋ">🌐 Language / ቋንቋ</span><button class="secondary" onclick="toggleLang()" data-en="English / አማርኛ" data-am="እንግሊዝኛ / አማርኛ">English / አማርኛ</button></div><button type="button" class="row support-trigger" onclick="toggleSupportContacts()" aria-expanded="false"><span data-en="🆘 Support" data-am="🆘 ድጋፍ">🆘 Support</span><span class="muted small" id="supportToggleHint" data-en="Tap to view contacts" data-am="ለማየት ይጫኑ">Tap to view contacts ▾</span></button><div class="support-links hidden" id="supportContacts"><b>📞 Goferehabesha Bingo Support</b><div class="support-account"><strong>📱 Telebirr Support / Receiving Accounts</strong><span>Nahom Million — 0943912235</span><span>Tewdros Getu — 0937189718</span><span>Tinsae Merga — 0934417096</span><small>Use only these listed Telebirr accounts. Verify the recipient name before sending.</small></div><a href="https://t.me/Gofere_Habesha_Bingo" target="_blank" rel="noopener">📢 Telegram Channel — Gofere Habesha Bingo</a><a href="https://t.me/Goferehabeshabingo" target="_blank" rel="noopener">👥 Telegram Group — Goferehabeshabingo</a></div><div class="row"><span data-en="👥 Referrals" data-am="👥 ግብዣዎች">👥 Referrals</span><span class="pill" id="refCount">0</span></div></div>
 </section>
 </div>
 
@@ -527,6 +528,7 @@ let winCells = [];
 let busy = false;
 let interval = null;
 let betCountdownInterval = null;
+let reservationPending = false;
 const selectedCartelas = new Set();
 const pendingCartelas = new Set();
 let choicesRenderKey = "";
@@ -931,18 +933,22 @@ async function refreshGame(){
   const gameEl=document.getElementById('game');if(gameEl)gameEl.classList.toggle('playing-mode',mine.length>0);
   const roundMessage=document.getElementById('roundMessage');
   if(roundMessage){roundMessage.textContent=L==='am'?'ጨዋታው ተጀምሯል። እባክዎ በሚቀጥለው ዙር ካርቴላ ይምረጡ።':'The game has started. Please choose a cartela in the next round.';roundMessage.classList.toggle('hidden',!!mine.length||G.status==='waiting'||G.status==='finished');}
-  if(mine.length){
+  if(mine.length && reservationPending && G.status==='waiting'){
+    document.getElementById('selectArea').classList.add('hidden');document.getElementById('playing').classList.add('hidden');
+    document.getElementById('reservationPanel')?.classList.remove('hidden');showReservationPanel();updateReservationCountdown();
+  }else if(mine.length){
+    document.getElementById('reservationPanel')?.classList.add('hidden');
     document.getElementById('selectArea').classList.add('hidden');
     document.getElementById('playing').classList.remove('hidden');
     document.getElementById('cardNum').textContent=mine.length+' cartela(s)';
     document.getElementById('chooseDesc').textContent=G.status==='waiting'?t('reservedStarts')+' '+G.lobby_seconds+' '+t('seconds')+'.':G.status==='running'?t('liveInstructions'):t('roundFinished');
     renderCards(mine,G.called,winCells);
   }else if(G.status==='waiting'){
-    document.getElementById('selectArea').classList.remove('hidden');
+    reservationPending=false;document.getElementById('reservationPanel')?.classList.add('hidden');document.getElementById('selectArea').classList.remove('hidden');
     document.getElementById('playing').classList.add('hidden');
     renderChoices();
   }else{
-    document.getElementById('selectArea').classList.remove('hidden');
+    reservationPending=false;document.getElementById('reservationPanel')?.classList.add('hidden');document.getElementById('selectArea').classList.remove('hidden');
     document.getElementById('playing').classList.add('hidden');
     renderChoices();
   }
@@ -1044,6 +1050,24 @@ async function startSelectedGame(){
  await joinGame(picked,stake);
  if((G?.my_cartelas||[]).length)go('game');
 }
+function showReservationPanel(){
+ const panel=document.getElementById('reservationPanel');const area=document.getElementById('selectArea');const mine=G?.my_cartelas||[];
+ if(!panel)return;reservationPending=true;area?.classList.add('hidden');panel.classList.remove('hidden');
+ const nums=mine.map(x=>'#'+x.cartela_number);const label=document.getElementById('reservationCartelas');if(label)label.textContent=(L==='am'?'የተመረጡ ካርቴላዎች፦ ':'Chosen cartela(s): ')+nums.join(', ');
+ updateReservationCountdown();
+}
+function updateReservationCountdown(){
+ const seconds=Math.max(0,Number(G?.lobby_seconds)||0);const n=document.getElementById('reservationSeconds');const text=document.getElementById('reservationCountdownText');const ring=document.getElementById('reservationRing');
+ if(n)n.textContent=String(seconds);if(text)text.textContent=L==='am'?`ጨዋታው በ${seconds} ሰከንድ ውስጥ ይጀምራል።`:`Your game starts in ${seconds} seconds.`;
+ if(ring)ring.style.setProperty('--progress',`${Math.max(0,Math.min(100,seconds/30*100))}%`);
+}
+async function continueToLiveGame(){reservationPending=false;document.getElementById('reservationPanel')?.classList.add('hidden');await refreshGame();}
+async function cancelReservationFromSelection(){
+ if(G?.status!=='waiting'){msg(L==='am'?'ጨዋታው ተጀምሯል፤ ካርቴላ መሰረዝ አይቻልም።':'The game has started; cartelas can no longer be cancelled.',true);return;}
+ const cards=G?.my_cartelas||[];for(const entry of cards){await api('/api/game/release',{method:'POST',body:JSON.stringify({cartela_number:Number(entry.cartela_number),stake:Number(entry.stake||currentLobbyStake||2)})});}
+ reservationPending=false;document.getElementById('reservationPanel')?.classList.add('hidden');await refreshGame();
+}
+
 async function joinGame(nums,stake){
  if(busy)return;busy=true;document.getElementById('startGameBtn').disabled=true;
  try{
@@ -1526,4 +1550,14 @@ body:not(.home-screen) #langBtn,body:not(.home-screen) .lang{display:none!import
 .joined-cartela-status{margin:0 0 8px;padding:9px 10px;border:1px solid #31576b;border-radius:10px;background:#0b2032;color:#ffd447;font-size:12px;line-height:1.4;font-weight:800;text-align:center}
 .joined-cartela-status:empty{display:none}
 @media(max-width:700px){#wallet.active,#leaderboard.active{padding-top:0!important;margin-top:-8px!important}#wallet.active>.title,#leaderboard.active>.title{margin:0 0 8px!important;padding:0!important}#wallet.active>.title h3,#leaderboard.active>.title h3{margin-top:0!important}}
+</style>
+
+<style id="reservation-countdown-and-support-details">
+.reservation-panel{margin:12px auto;padding:14px 12px;max-width:420px;text-align:center;border:1px solid #31576b;border-radius:14px;background:#0b2032;box-shadow:0 8px 24px #0003}
+.reservation-title{font-size:17px;font-weight:900;color:#ffd447;margin-bottom:8px}.reservation-cartelas{font-size:14px;font-weight:800;color:#fff;overflow-wrap:anywhere;margin:5px 0 12px}
+.countdown-ring{--progress:100%;width:116px;height:116px;border-radius:50%;margin:8px auto 10px;display:grid;place-items:center;background:conic-gradient(#ffd447 var(--progress),#24485a 0);position:relative;animation:ringPulse 1s ease-in-out infinite alternate}
+.countdown-ring:before{content:"";position:absolute;inset:8px;border-radius:50%;background:#0b2032}.countdown-ring>div{position:relative;display:grid;gap:1px}.countdown-ring strong{font-size:34px;line-height:1;color:#fff;font-variant-numeric:tabular-nums}.countdown-ring small{font-size:9px;letter-spacing:1.5px;color:#9fc4d3}
+@keyframes ringPulse{from{transform:scale(1)}to{transform:scale(1.035)}}.reservation-panel p{font-size:12px;color:#c2d4df;margin:6px 0 12px}.reservation-actions{display:flex;justify-content:center;gap:8px}.reservation-actions button{width:auto!important;min-height:34px!important;padding:7px 12px!important;font-size:11px!important;border-radius:8px!important}
+.support-account{display:grid;gap:5px;padding:9px;border:1px solid #31576b;border-radius:8px;background:#102b40;font-size:12px}.support-account strong{color:#ffd447}.support-account small{color:#a9c3d0;margin-top:3px}
+#selectArea.hidden{display:none!important}
 </style>
