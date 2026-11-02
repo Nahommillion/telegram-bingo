@@ -279,6 +279,20 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opa
 body:has(#game.active.playing-mode) .bottom{display:none!important}
 body:has(#game.active.playing-mode) .active-game-controls{display:grid}
 body:has(#game.active.playing-mode) #game{padding-bottom:78px!important}
+/* Your existing CSS above remains unchanged */
+
+.selected-cartela-section {
+  margin-top: 22px;
+  text-align: left;
+}
+
+/* Paste the rest of the CSS here */
+
+@media(max-width:480px) {
+  .selected-cartela-previews {
+    grid-template-columns: 1fr;
+  }
+}
 
 </style>
 
@@ -337,38 +351,163 @@ body:has(#home.active) #brandSubtitle{display:none!important}
 </section>
 
 <section class="screen" id="game">
-<div class="title"><h3 id="gameTitle">Game Lobby</h3><span class="pill" id="gameStatus">WAITING</span></div>
-<div class="panel center">
-<div class="muted" id="chooseDesc">Choose your cartela and join the next game.</div>
-<div class="stats compact-stats">
- <div class="stat"><span id="startsLabel">STARTS IN</span><strong id="timer">00:30</strong></div>
- <div class="stat"><span id="gamePlayersLabel">PLAYERS</span><strong id="count">0</strong></div>
- <div class="stat"><span id="totalBetsLabel">TOTAL BETS</span><strong id="totalBets">0.00 Birr</strong></div>
- <div class="stat"><span id="prizeLabel">WINNER GETS</span><strong id="prizeAmount">0.00 Birr</strong></div>
-</div>
+  <div class="title">
+    <h3 id="gameTitle">Game Lobby</h3>
+    <span class="pill" id="gameStatus">WAITING</span>
+  </div>
 
-<div class="stats called-stat-row"><div class="stat"><span id="calledStatLabel">CALLED</span><strong id="calledCount">0/75</strong></div></div>
-</div>
-<div class="game-workspace"><div class="called-side"><div class="panel called-panel"><div id="calloutBoard" class="callout-board"></div><div class="chips hidden" id="allCalled"></div></div></div><div class="cartela-side">
-<div class="notice hidden" id="fundingNotice">💰 Please deposit funds and wait for payment verification. Your available wallet balance must cover at least one cartela at your selected bet amount. <button class="secondary" type="button" onclick="go('wallet')">Open Wallet</button></div>
-<div id="selectArea">
- <div class="title"><h3 id="availableCartelasTitle">🟢 Available Cartelas</h3><span class="muted small" id="availableCount">200 available</span></div>
- <div class="panel">
-  <p class="muted small" id="cartelaHelp">Tap green cartelas to select them. Dim black cartelas are already taken. Your selections are reserved instantly while you prepare your bet.</p>
-  <label class="small muted" id="stakeLabel">Bet per cartela (minimum 2 Birr)</label>
-  <input id="stake" class="field" type="number" min="2" max="1000" step="0.01" value="2" oninput="updateSelectionSummary()" onchange="changeStakeLobby()">
-  <div class="muted small" id="betSummary">Select cartelas to calculate your total bet.</div>
-  <button class="primary" id="startGameBtn" onclick="startSelectedGame()" disabled>🎮 Start Game</button><button class="danger wide" type="button" onclick="cancelCartelaSelection()">✖ Cancel selection</button>
-  <div class="cardgrid" id="choices"></div>
-  <div class="selection-summary"><span id="selectedLabel">Selected cartela</span><strong id="selectedCartelaLabel">None</strong></div>
- </div>
-</div>
-<div id="playing" class="hidden">
- <div class="title"><h3 id="yourCard">Your Cartela</h3><span class="pill" id="cardNum"></span></div>
- <div class="panel"><div class="chips recent-called hidden" id="recent"></div><div id="myCards"></div><div id="claimMsg" class="notice hidden"></div><div id="winnerCartela" class="hidden"></div></div>
-</div>
-<div id="roundMessage" class="notice hidden">The game has started. Please choose a cartela in the next round.</div>
-</div></div></div>
+  <div class="panel center">
+    <div class="muted" id="chooseDesc">
+      Choose your cartela and join the next game.
+    </div>
+
+    <div class="stats compact-stats">
+      <div class="stat">
+        <span id="startsLabel">STARTS IN</span>
+        <strong id="timer">00:30</strong>
+      </div>
+      <div class="stat">
+        <span id="gamePlayersLabel">PLAYERS</span>
+        <strong id="count">0</strong>
+      </div>
+      <div class="stat">
+        <span id="totalBetsLabel">TOTAL BETS</span>
+        <strong id="totalBets">0.00 Birr</strong>
+      </div>
+      <div class="stat">
+        <span id="prizeLabel">WINNER GETS</span>
+        <strong id="prizeAmount">0.00 Birr</strong>
+      </div>
+    </div>
+
+    <div class="stats called-stat-row">
+      <div class="stat">
+        <span id="calledStatLabel">CALLED</span>
+        <strong id="calledCount">0/75</strong>
+      </div>
+    </div>
+  </div>
+
+  <div class="game-workspace">
+    <div class="called-side">
+      <div class="panel called-panel">
+        <div id="calloutBoard" class="callout-board"></div>
+        <div class="chips hidden" id="allCalled"></div>
+      </div>
+    </div>
+
+    <div class="cartela-side">
+
+      <div class="notice hidden" id="fundingNotice">
+        💰 Please deposit funds and wait for payment verification.
+        Your available wallet balance must cover at least one cartela
+        at your selected bet amount.
+        <button class="secondary" type="button" onclick="go('wallet')">
+          Open Wallet
+        </button>
+      </div>
+
+      <!-- CARTELA SELECTION SCREEN -->
+      <div id="selectArea">
+
+        <div class="title">
+          <h3 id="availableCartelasTitle">🟢 Available Cartelas</h3>
+          <span class="muted small" id="availableCount">200 available</span>
+        </div>
+
+        <div class="panel">
+
+          <p class="muted small" id="cartelaHelp">
+            Tap green cartelas to select them. Dim black cartelas are
+            already taken. Your selections are reserved instantly
+            while you prepare your bet.
+          </p>
+
+          <label class="small muted" id="stakeLabel">
+            Bet per cartela (minimum 2 Birr)
+          </label>
+
+          <input
+            id="stake"
+            class="field"
+            type="number"
+            min="2"
+            max="1000"
+            step="0.01"
+            value="2"
+            oninput="updateSelectionSummary()"
+            onchange="changeStakeLobby()"
+          >
+
+          <div class="muted small" id="betSummary">
+            Select cartelas to calculate your total bet.
+          </div>
+
+          <button
+            class="primary"
+            id="startGameBtn"
+            onclick="startSelectedGame()"
+            disabled
+          >
+            🎮 Start Game
+          </button>
+
+          <button
+            class="danger wide"
+            type="button"
+            onclick="cancelCartelaSelection()"
+          >
+            ✖ Cancel selection
+          </button>
+
+          <!-- ALL 200 CARTELA CHOICES -->
+          <div class="cardgrid" id="choices"></div>
+
+          <!-- FULL SELECTED CARTELA PREVIEWS WILL APPEAR HERE -->
+          <div class="selected-cartela-section">
+            <div class="title">
+              <h3>🎱 Your Selected Cartelas</h3>
+            </div>
+
+            <div id="selectedCartelaPreviews" class="selected-cartela-previews">
+              <p class="muted small">
+                Your selected Bingo cards will appear here.
+              </p>
+            </div>
+          </div>
+
+          <!-- Keep this hidden element for existing JavaScript compatibility -->
+          <div class="selection-summary hidden">
+            <span id="selectedLabel">Selected cartela</span>
+            <strong id="selectedCartelaLabel">None</strong>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- LIVE GAME SCREEN -->
+      <div id="playing" class="hidden">
+
+        <div class="title">
+          <h2 id="yourCard">🎱 BINGO</h2>
+          <span class="pill" id="cardNum"></span>
+        </div>
+
+        <div class="panel">
+          <div class="chips recent-called hidden" id="recent"></div>
+          <div id="myCards"></div>
+          <div id="claimMsg" class="notice hidden"></div>
+          <div id="winnerCartela" class="hidden"></div>
+        </div>
+
+      </div>
+
+      <div id="roundMessage" class="notice hidden">
+        The game has started. Please choose a cartela in the next round.
+      </div>
+
+    </div>
+  </div>
 </section>
 
 <section class="screen" id="wallet">
