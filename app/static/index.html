@@ -325,10 +325,9 @@ body:has(#home.active) #brandSubtitle{display:none!important}
 
 <section class="screen active" id="home">
 <div class="hero"><h2 id="hero">🎉 Welcome to Goferehabesha Cartela Bingo!</h2><p id="tagline">Choose a cartela. Follow the numbers. Claim your win! 🎱</p><div class="balls"><span class="ball">7</span><span class="ball">23</span><span class="ball">46</span></div></div>
-<div class="panel home-profile"><div class="home-profile-wrap"><img class="home-avatar" id="homeAvatar" alt="Player profile" src=""><div class="home-profile-main"><div class="home-profile-name" id="homeProfileName">Player</div><div class="home-profile-phone" id="homeProfilePhone">Telegram player</div></div><div class="home-profile-balance"><small id="homeProfileBalanceLabel">BALANCE</small><strong id="homeProfileBalance">0.00 Birr</strong></div><div class="profile-greeting" id="homeProfileGreeting">👋 Welcome back!</div></div></div>
+<div class="panel home-profile"><div class="home-profile-wrap"><img class="home-avatar" id="homeAvatar" alt="Player profile" src=""><div class="home-profile-main"><div class="home-profile-name" id="homeProfileName">Player</div><div class="home-profile-phone" id="homeProfilePhone">Telegram player</div></div><div class="home-profile-balance"><small id="homeProfileBalanceLabel">BALANCE</small><strong id="homeProfileBalance">0.00 Birr</strong></div><div class="profile-greeting" id="homeProfileGreeting">👋 Welcome back, 💚💛❤️! ✨</div></div></div>
 <div class="stats">
 <div class="stat"><span id="balLabel">YOUR BALANCE</span><strong id="homeBal">0.00 Birr</strong></div>
-<div class="stat"><span id="homeGameLabel">GAME</span><strong id="gameId">#1</strong></div>
 </div>
 <div class="title"><h3 id="betChooseTitle">Choose Your Bet</h3></div><div class="bet-choice-row"><button class="bet-choice" onclick="chooseHomeBet(2)">2 Birr<small class="bet-round-status" id="betCountdown2">⏳ --:--</small></button><button class="bet-choice" onclick="chooseHomeBet(3)">3 Birr<small class="bet-round-status" id="betCountdown3">⏳ --:--</small></button><button class="bet-choice" onclick="chooseHomeBet(5)">5 Birr<small class="bet-round-status" id="betCountdown5">⏳ --:--</small></button></div>
 <!-- Removed redundant shared home countdown; each bet has its own countdown above. -->
@@ -439,7 +438,11 @@ body:has(#home.active) #brandSubtitle{display:none!important}
 <section class="screen" id="profile">
 <div class="title"><h3 id="profileTitle">Player Profile</h3></div>
 <div class="title"><h3 id="settings">Settings</h3></div>
-<div class="panel"><div class="row"><span data-en="🌐 Language" data-am="🌐 ቋንቋ">🌐 Language / ቋንቋ</span><button class="secondary" onclick="toggleLang()" data-en="English / አማርኛ" data-am="እንግሊዝኛ / አማርኛ">English / አማርኛ</button></div><div class="row"><span data-en="🆘 Support" data-am="🆘 ድጋፍ">🆘 Support</span><span class="muted small" data-en="Contact admin" data-am="አስተዳዳሪውን ያነጋግሩ">Contact admin</span></div><div class="row"><span data-en="👥 Referrals" data-am="👥 ግብዣዎች">👥 Referrals</span><span class="pill" id="refCount">0</span></div></div>
+<div class="panel"><div class="row"><span data-en="🌐 Language" data-am="🌐 ቋንቋ">🌐 Language / ቋንቋ</span><button class="secondary" onclick="toggleLang()" data-en="English / አማርኛ" data-am="እንግሊዝኛ / አማርኛ">English / አማርኛ</button></div><div class="support-links">
+ <div class="row"><span>🆘 Support</span><span class="muted small">Telebirr: +251943912235</span></div>
+ <div class="row"><span>📢 Telegram Channel</span><a href="https://t.me/Gofere_Habesha_Bingo" target="_blank" rel="noopener">Join Channel</a></div>
+ <div class="row"><span>👥 Telegram Group</span><a href="https://t.me/Goferehabeshabingo" target="_blank" rel="noopener">Join Group</a></div>
+</div><div class="row"><span data-en="👥 Referrals" data-am="👥 ግብዣዎች">👥 Referrals</span><span class="pill" id="refCount">0</span></div></div>
 </section>
 </div>
 
@@ -614,6 +617,7 @@ function depositStatus(s,bad=false){
 function go(id){
   document.querySelectorAll('.screen').forEach(x=>x.classList.toggle('active',x.id===id));
   document.querySelectorAll('.nav').forEach(x=>x.classList.toggle('active',x.dataset.tab===id));
+  const langBtn=document.getElementById('langBtn');if(langBtn)langBtn.classList.toggle('hidden',id==='game');
   if(id==='game')refreshGame().catch(e=>msg(e.message,true));
   if(id==='wallet')refreshWallet();
   if(id==='leaderboard')refreshLeaders();
@@ -1048,23 +1052,27 @@ function toggleMark(cartela,n){
 }
 async function claimActiveCartela(){
  const cards=G?.my_cartelas||((G?.my_cartela)?[{cartela_number:G.my_cartela_number}]:[]);
- if(!cards.length){msg(L==='am'?'ካርቴላ አልተመረጠም':'No joined cartela to claim',true);return;}
- // Keep the existing server-side claim path and pass the exact cartela number.
- await claim(Number(cards[0].cartela_number));
+ const numbers=[...new Set(cards.map(x=>Number(x.cartela_number)).filter(n=>Number.isInteger(n)&&n>=1&&n<=200))];
+ if(!numbers.length){msg(L==='am'?'ካርቴላ አልተመረጠም':'No joined cartelas to claim',true);return;}
+ await claim(numbers);
 }
 async function claim(cartela){
  try{
-  const marks=manualMarksByCard[Number(cartela)]||new Set([0]);
-  const r=await api('/api/game/claim',{method:'POST',body:JSON.stringify({cartela_number:Number(cartela),marked:[...marks]})});
+  const numbers=(Array.isArray(cartela)?cartela:[cartela]).map(Number).filter(n=>Number.isInteger(n)&&n>=1&&n<=200);
+  if(!numbers.length){msg(L==='am'?'ካርቴላ አልተመረጠም':'No valid cartelas to check',true);return;}
+  const r=await api('/api/game/claim',{method:'POST',body:JSON.stringify({cartela_numbers:numbers})});
   winCells=r.pattern||[];
-  document.getElementById('claimMsg').textContent=`🎉🏆 WINNER! Cartela #${r.cartela_number||cartela} — Prize: ${money(r.prize)} (80% of ${money(r.total_bets)} total bets)! 🎊`;
-  document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
+  const winnerNumber=r.cartela_number||'';
+  document.getElementById('claimMsg').textContent=`🎉🏆 WINNER! Cartela #${winnerNumber} — Prize: ${money(r.prize)} (80% of ${money(r.total_bets)} total bets)! 🎊`;
+  document.getElementById('claimMsg').className='notice';
+  document.getElementById('claimMsg').classList.remove('hidden');
   await refreshGame();await refreshWallet();telegramApp()?.HapticFeedback?.notificationOccurred('success');
  }catch(e){
   const claimError=e.message;
   await refreshGame().catch(()=>{});
   document.getElementById('claimMsg').textContent=claimError;
-  document.getElementById('claimMsg').className='notice err';document.getElementById('claimMsg').classList.remove('hidden');
+  document.getElementById('claimMsg').className='notice err';
+  document.getElementById('claimMsg').classList.remove('hidden');
  }
 }
 
@@ -1242,7 +1250,7 @@ function updateHomeProfile(){
   const nameEl=document.getElementById('homeProfileName');if(nameEl)nameEl.textContent=name;
   const phoneEl=document.getElementById('homeProfilePhone');if(phoneEl)phoneEl.textContent=me.phone_number|| (me.username?'@'+me.username:'Telegram player');
   const balEl=document.getElementById('homeProfileBalance');if(balEl)balEl.textContent=money(me.balance||0);
-  const greet=document.getElementById('homeProfileGreeting');if(greet)greet.textContent='👋 '+(L==='am'?'እንኳን ደህና መጡ':'Welcome back')+', '+name+'! ✨';
+  const greet=document.getElementById('homeProfileGreeting');if(greet)greet.textContent='👋 '+(L==='am'?'እንኳን ደህና መጡ':'Welcome back')+', 💚💛❤️! ✨';
   const avatar=document.getElementById('homeAvatar');if(avatar){if(user.photo_url){avatar.src=user.photo_url;avatar.style.display='block';}else{avatar.src='';avatar.style.display='none';}}
 }
 
@@ -1426,4 +1434,10 @@ body > #winnerCartela.winner-overlay .winner-card{max-width:100%!important;margi
 #home .bet-choice{background:linear-gradient(135deg,rgba(53,217,155,.62),rgba(22,184,200,.62))!important;opacity:.84!important}
 #activeGameControls .sound-icon{min-width:44px;font-size:20px;padding:8px 10px}
 #game.active #cartelaSearch,#game.active #chooseCard{display:none!important}
+/* Requested home and support refinements */
+.profile-greeting{font-size:clamp(20px,4vw,27px)!important;font-weight:800!important;line-height:1.25}
+.bet-choice{opacity:.78}
+.bet-choice:active{opacity:.62}
+.support-links a{color:#f5d76e;text-decoration:none;font-weight:700}
+.support-links .row{gap:12px;flex-wrap:wrap}
 </style>
