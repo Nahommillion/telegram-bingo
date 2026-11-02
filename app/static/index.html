@@ -328,9 +328,6 @@ body:has(#home.active) #brandSubtitle{display:none!important}
 <div class="panel home-profile"><div class="home-profile-wrap"><img class="home-avatar" id="homeAvatar" alt="Player profile" src=""><div class="home-profile-main"><div class="home-profile-name" id="homeProfileName">Player</div><div class="home-profile-phone" id="homeProfilePhone">Telegram player</div></div><div class="home-profile-balance"><small id="homeProfileBalanceLabel">BALANCE</small><strong id="homeProfileBalance">0.00 Birr</strong></div><div class="profile-greeting" id="homeProfileGreeting">👋 Welcome back!</div></div></div>
 <div class="stats">
 <div class="stat"><span id="balLabel">YOUR BALANCE</span><strong id="homeBal">0.00 Birr</strong></div>
-<div class="stat"><span id="playersLabel">PLAYERS</span><strong id="homePlayers">0</strong></div>
-<div class="stat"><span id="homeTotalBetsLabel">TOTAL BETS</span><strong id="homeTotalBets">0.00 Birr</strong></div>
-<div class="stat"><span id="homePrizeLabel">WINNER GETS / ደራሽ</span><strong id="homePrizeAmount">0.00 Birr</strong></div>
 <div class="stat"><span id="homeGameLabel">GAME</span><strong id="gameId">#1</strong></div>
 </div>
 <div class="title"><h3 id="betChooseTitle">Choose Your Bet</h3></div><div class="bet-choice-row"><button class="bet-choice" onclick="chooseHomeBet(2)">2 Birr<small class="bet-round-status" id="betCountdown2">⏳ --:--</small></button><button class="bet-choice" onclick="chooseHomeBet(3)">3 Birr<small class="bet-round-status" id="betCountdown3">⏳ --:--</small></button><button class="bet-choice" onclick="chooseHomeBet(5)">5 Birr<small class="bet-round-status" id="betCountdown5">⏳ --:--</small></button></div>
@@ -349,7 +346,7 @@ body:has(#home.active) #brandSubtitle{display:none!important}
  <div class="stat"><span id="totalBetsLabel">TOTAL BETS</span><strong id="totalBets">0.00 Birr</strong></div>
  <div class="stat"><span id="prizeLabel">WINNER GETS</span><strong id="prizeAmount">0.00 Birr</strong></div>
 </div>
-<button type="button" class="sound-toggle" id="soundToggle" onclick="toggleCallSound()">🔇 Enable called-number sound</button>
+
 <div class="stats called-stat-row"><div class="stat"><span id="calledStatLabel">CALLED</span><strong id="calledCount">0/75</strong></div></div>
 </div>
 <div class="game-workspace"><div class="called-side"><div class="panel called-panel"><div id="calloutBoard" class="callout-board"></div><div class="chips hidden" id="allCalled"></div></div></div><div class="cartela-side">
@@ -357,9 +354,7 @@ body:has(#home.active) #brandSubtitle{display:none!important}
 <div id="selectArea">
  <div class="title"><h3 id="availableCartelasTitle">🟢 Available Cartelas</h3><span class="muted small" id="availableCount">200 available</span></div>
  <div class="panel">
-  <div class="title" style="margin-top:0"><h3 id="chooseCard">Choose Your Cartela (1–200)</h3></div>
   <p class="muted small" id="cartelaHelp">Tap green cartelas to select them. Dim black cartelas are already taken. Your selections are reserved instantly while you prepare your bet.</p>
-  <input id="cartelaSearch" class="field" type="number" min="1" max="200" placeholder="Find cartela number (1–200)" oninput="renderChoices()">
   <label class="small muted" id="stakeLabel">Bet per cartela (minimum 2 Birr)</label>
   <input id="stake" class="field" type="number" min="2" max="1000" step="0.01" value="2" oninput="updateSelectionSummary()" onchange="changeStakeLobby()">
   <div class="muted small" id="betSummary">Select cartelas to calculate your total bet.</div>
@@ -458,6 +453,7 @@ body:has(#home.active) #brandSubtitle{display:none!important}
 <div id="activeGameControls" class="active-game-controls" aria-label="Active game controls">
  <button type="button" class="secondary" onclick="go('home')">↩ Leave</button>
  <button type="button" class="secondary" onclick="refreshGame().catch(e=>msg(e.message,true))">↻ Refresh</button>
+ <button type="button" class="secondary sound-icon" id="soundToggle" aria-label="Toggle called-number sound" title="Toggle called-number sound" onclick="toggleCallSound()">🔇</button>
  <button type="button" class="danger" id="activeBingoBtn" onclick="claimActiveCartela()">🏆 BINGO!</button>
 </div>
 
@@ -773,7 +769,9 @@ let callSoundEnabled=false;let lastSoundedCount=0;let audioCtx=null;let soundPri
 async function toggleCallSound(){
  callSoundEnabled=!callSoundEnabled;
  const btn=document.getElementById('soundToggle');
- btn.textContent=callSoundEnabled?t('soundOn'):t('soundEnable');
+ btn.textContent=callSoundEnabled?'🔊':'🔇';
+ btn.setAttribute('aria-label',callSoundEnabled?'Called-number sound on':'Called-number sound off');
+ btn.title=callSoundEnabled?'Called-number sound on':'Called-number sound off';
  btn.classList.toggle('on',callSoundEnabled);
  if(callSoundEnabled){
   try{
@@ -790,7 +788,7 @@ async function toggleCallSound(){
    }
    playCallTone(null,true);
    if(!AC&&!('speechSynthesis' in window))msg('This browser does not support called-number sound.',true);
-  }catch(e){console.log('Sound activation issue',e);msg('Tap Enable called-number sound again to allow audio.',true);}
+  }catch(e){console.log('Sound activation issue',e);msg('Tap the sound icon again to allow audio.',true);}
  }
 }
 async function playCallTone(number,preview=false){
@@ -939,13 +937,13 @@ function renderChoices(){
  if(selectArea)selectArea.classList.toggle('hidden',!funded||!!(G?.my_cartelas||[]).length);
  if(!funded){selectedCartelas.clear();pendingCartelas.clear();choicesRenderKey='';const choices=document.getElementById('choices');if(choices)choices.innerHTML='';const count=document.getElementById('availableCount');if(count)count.textContent='—';const start=document.getElementById('startGameBtn');if(start)start.disabled=true;return;}
  const taken=cartelasTakenByOthers();
- const q=Number(document.getElementById('cartelaSearch')?.value||0);let available=0;
+ let available=0;
  for(let n=1;n<=200;n++)if(!taken.has(n))available++;
- const key=[G?.status||'',q,[...taken].sort((a,b)=>a-b).join(','),[...selectedCartelas].sort((a,b)=>a-b).join(','),[...pendingCartelas].sort((a,b)=>a-b).join(',')].join('|');
+ const key=[G?.status||'', [...taken].sort((a,b)=>a-b).join(','),[...selectedCartelas].sort((a,b)=>a-b).join(','),[...pendingCartelas].sort((a,b)=>a-b).join(',')].join('|');
  if(key!==choicesRenderKey){
   let h='';
   for(let n=1;n<=200;n++){
-   const used=taken.has(n),pending=pendingCartelas.has(n),roundLocked=G?.status!=='waiting';if(q&&n!==q)continue;
+   const used=taken.has(n),pending=pendingCartelas.has(n),roundLocked=G?.status!=='waiting';
    h+=`<button type="button" class="pick ${used?'taken':''} ${selectedCartelas.has(n)?'selected':''} ${pending?'pending':''} ${roundLocked?'round-locked':''}" ${used||pending||roundLocked?'disabled':''} aria-label="Cartela ${n}${used?' taken':selectedCartelas.has(n)?' selected':' available'}" onclick="selectCartela(${n})">${n}</button>`;
   }
   document.getElementById('choices').innerHTML=h||`<div class="muted small">${t('noCartelaMatch')}</div>`;
@@ -958,7 +956,6 @@ function renderChoices(){
 }
 async function selectCartela(n){
  n=Number(n);const taken=cartelasTakenByOthers();if(G?.status!=='waiting'){msg(L==='am'?'ጨዋታው ተጀምሯል። እባክዎ ከጨዋታው በኋላ ካርቴላ ይምረጡ።':'The game has already started. Please choose a cartela after the round finishes.',true);return;}if(taken.has(n)||pendingCartelas.has(n))return;
- const search=document.getElementById('cartelaSearch');if(search)search.value='';
  const removing=selectedCartelas.has(n);
  pendingCartelas.add(n);
  if(removing)selectedCartelas.delete(n);else selectedCartelas.add(n);
@@ -1420,4 +1417,13 @@ body > #winnerCartela.winner-overlay .winner-card{max-width:100%!important;margi
 #game .call-col:nth-child(5) .call-num.called{background:#c99aff!important;color:#071525!important;border-color:#e8d2ff!important}
 #game .call-col .call-num.current-call{outline:2px solid #fff!important;outline-offset:-2px!important;filter:brightness(1.12)!important}
 @media(max-width:420px){#game.active:not(.playing-mode) #selectArea .cardgrid{grid-template-columns:repeat(10,minmax(0,1fr))!important;gap:2px!important;padding:2px!important}#game.active:not(.playing-mode) #selectArea .pick{min-height:clamp(25px,7vw,32px)!important;font-size:10px!important;padding:2px 0!important}#game.active:not(.playing-mode) #selectArea>.panel{padding:5px!important}}
+</style>
+
+<style id="requested-home-and-control-refinements">
+#home .stats .stat:has(#homePlayers),#home .stats .stat:has(#homeTotalBets),#home .stats .stat:has(#homePrizeAmount){display:none!important}
+#home .profile-greeting,#home .home-profile-name{font-size:clamp(20px,5vw,30px)!important;font-weight:1000!important}
+#home .home-profile-name{color:#f5d84a!important}
+#home .bet-choice{background:linear-gradient(135deg,rgba(53,217,155,.62),rgba(22,184,200,.62))!important;opacity:.84!important}
+#activeGameControls .sound-icon{min-width:44px;font-size:20px;padding:8px 10px}
+#game.active #cartelaSearch,#game.active #chooseCard{display:none!important}
 </style>
