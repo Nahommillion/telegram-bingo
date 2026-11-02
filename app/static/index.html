@@ -312,6 +312,34 @@ body:has(#home.active) #brandSubtitle{display:none!important}
 }
 </style>
 
+
+<style id="final-live-game-controls-and-fixed-layout">
+/* The active game stays in the viewport; only the player's cartela column scrolls. */
+body:has(#game.active.playing-mode){overflow:hidden!important;height:100dvh!important}
+#game.active.playing-mode{height:calc(100dvh - 8px)!important;max-height:calc(100dvh - 8px)!important;overflow:hidden!important;padding-bottom:64px!important;box-sizing:border-box!important}
+#game.active.playing-mode>.panel.center{position:sticky!important;top:0!important;z-index:60!important}
+#game.active.playing-mode .game-workspace{height:calc(100dvh - 116px)!important;max-height:calc(100dvh - 116px)!important;overflow:hidden!important;align-items:stretch!important}
+#game.active.playing-mode .game-workspace .called-side{position:relative!important;top:auto!important;height:100%!important;max-height:100%!important;overflow:hidden!important;align-self:stretch!important}
+#game.active.playing-mode .game-workspace .called-panel{height:100%!important;max-height:100%!important;overflow:hidden!important}
+#game.active.playing-mode .game-workspace .callout-board{height:100%!important;grid-template-rows:minmax(0,1fr)!important;gap:1px!important}
+#game.active.playing-mode .game-workspace .call-col-list{gap:0!important;padding:1px!important}
+#game.active.playing-mode .game-workspace .call-num{margin:0!important;min-height:0!important;border-radius:2px!important}
+#game.active.playing-mode .game-workspace .cartela-side{height:100%!important;max-height:100%!important;overflow-y:auto!important;overflow-x:hidden!important;overscroll-behavior:contain!important;align-self:stretch!important;padding-bottom:8px!important}
+#game.active.playing-mode #playing .my-card-item{padding:6px!important}
+#game.active.playing-mode #playing .my-card-item .live-bingo-heading{display:block!important;text-align:center!important;font-size:clamp(16px,4vw,21px)!important;line-height:1.15!important;margin:3px 0 6px!important;color:#ffd447!important;letter-spacing:1px!important}
+#game.active.playing-mode #playing .my-card-item .card{gap:2px!important;padding:3px!important}
+#game.active.playing-mode #playing .my-card-item .cell{min-height:clamp(19px,2.7dvh,27px)!important;font-size:clamp(9px,2.15vw,12px)!important}
+.active-game-controls{grid-template-columns:1fr 1fr 34px minmax(76px,.85fr)!important;gap:5px!important;padding:5px max(7px,env(safe-area-inset-right)) calc(5px + env(safe-area-inset-bottom)) max(7px,env(safe-area-inset-left))!important;align-items:center!important}
+.active-game-controls button{min-height:32px!important;height:32px!important;padding:4px 5px!important;font-size:11px!important;line-height:1!important;border-radius:8px!important}
+.active-game-controls #soundToggle{width:32px!important;min-width:32px!important;height:32px!important;padding:0!important;font-size:16px!important;display:flex!important;align-items:center!important;justify-content:center!important}
+.active-game-controls #activeBingoBtn{font-size:11px!important;font-weight:900!important;white-space:nowrap!important}
+#game.active.playing-mode .game-workspace .called-side:before{padding:3px 0!important;font-size:12px!important}
+@media(max-width:700px){
+ #game.active.playing-mode .game-workspace{height:calc(100dvh - 112px)!important;max-height:calc(100dvh - 112px)!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;gap:4px!important}
+ #game.active.playing-mode .game-workspace .cartela-side{height:100%!important;max-height:100%!important}
+}
+</style>
+
 </head>
 <body>
 <div class="float-bg" aria-hidden="true"><span>🎱</span><span>✦</span><span>●</span><span>🎱</span><span>✦</span><span>●</span><span>🎱</span><span>✦</span><span>●</span><span>🎱</span><span>✧</span><span>●</span></div>
@@ -698,7 +726,7 @@ function applyLang(){
   const stake=document.getElementById('stake');
   if(stake){stake.min='2';if(Number(stake.value)<2)stake.value='2';currentLobbyStake=Number(stake.value)||2;}
   const search=document.getElementById('cartelaSearch');if(search)search.placeholder=t('findCartela');
-  const sound=document.getElementById('soundToggle');if(sound)sound.textContent=callSoundEnabled?t('soundOn'):t('soundEnable');
+  const sound=document.getElementById('soundToggle');if(sound){sound.textContent=callSoundEnabled?'🔊':'🔇';sound.setAttribute('aria-label',callSoundEnabled?'Called-number sound on':'Called-number sound off');}
   const payerLabel=document.querySelector('#payerPhoneWrap label');if(payerLabel)payerLabel.textContent=t('payerPhoneLabel');
   const payerHelp=document.querySelector('#payerPhoneWrap p');if(payerHelp)payerHelp.textContent=t('payerPhoneHelp');
   const providerOptions=document.getElementById('provider');
@@ -919,7 +947,7 @@ async function refreshGame(){
     if(winnerHost && winnerHost.parentElement !== document.body){ winnerHost.classList.add('winner-overlay'); document.body.appendChild(winnerHost); }
     document.getElementById('claimMsg').textContent='🏆 '+G.winner.name+' '+t('wonWithCartela')+' #'+G.winner.cartela_number+' — '+t('prizeWord')+' '+money(G.winner.prize||0)+'.';
     document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
-    if(winnerHost&&Array.isArray(G.winner.cartela)){const marked=new Set((G.winner.pattern||[]).map(x=>x.join(',')));winnerHost.classList.remove('hidden');winnerHost.innerHTML='<div class="winner-celebration"><div class="party">🎉 🎊 🏆 🎊 🎉</div><div>'+(L==='am'?'አሸናፊ!':'WE HAVE A WINNER!')+'</div><div class="winner-name">'+esc(G.winner.name||'Player')+' — '+(L==='am'?'ካርቴላ':'Cartela')+' #'+G.winner.cartela_number+'</div><div class="winner-prize">💰 '+(L==='am'?'ሽልማት':'Prize')+': '+money(G.winner.prize||0)+'</div></div><div class="winner-card"><h4>🏆 '+(L==='am'?'አሸናፊ ካርቴላ':'Winning Cartela')+' #'+G.winner.cartela_number+'</h4><div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div><div class="card">'+G.winner.cartela.flatMap((row,r)=>row.map((v,c)=>'<div class="cell '+(marked.has([r,c].join(','))?'win':'')+'">'+(v===0?'★':v)+'</div>')).join('')+'</div></div>';}
+    if(winnerHost&&Array.isArray(G.winner.cartela)){const marked=new Set((G.winner.pattern||[]).map(x=>x.join(',')));const touched=new Set(G.winner.marked_numbers||[]);winnerHost.classList.remove('hidden');winnerHost.innerHTML='<div class="winner-celebration"><div class="party">🎉 🎊 🏆 🎊 🎉</div><div>'+(L==='am'?'አሸናፊ!':'WE HAVE A WINNER!')+'</div><div class="winner-name">'+esc(G.winner.name||'Player')+' — '+(L==='am'?'ካርቴላ':'Cartela')+' #'+G.winner.cartela_number+'</div><div class="winner-prize">💰 '+(L==='am'?'ሽልማት':'Prize')+': '+money(G.winner.prize||0)+'</div></div><div class="winner-card"><h4>🏆 '+(L==='am'?'አሸናፊ ካርቴላ':'Winning Cartela')+' #'+G.winner.cartela_number+'</h4><div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div><div class="card">'+G.winner.cartela.flatMap((row,r)=>row.map((v,c)=>'<div class="cell '+(marked.has([r,c].join(','))?'win':(touched.has(v)?'marked':''))+'">'+(v===0?'★':v)+'</div>')).join('')+'</div></div>';}
   }else if(G.status==='running') {document.getElementById('claimMsg').classList.add('hidden');if(winnerHost)winnerHost.classList.add('hidden');}
   if(G.status==='finished'&&!G.winner){document.getElementById('claimMsg').textContent=(Number(G.total_bets||0)===0?t('noBetsRound'):t('noWinnerRound'));document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');if(winnerHost)winnerHost.classList.add('hidden');}
   if(G.status==='waiting'&&!G.winner&&winnerHost)winnerHost.classList.add('hidden');
@@ -1047,7 +1075,6 @@ function renderCards(cards,called,wins=[]){
    const marked=v===0||marks.has(v),wasCalled=v===0||called.includes(v);
    return `<button type="button" class="cell ${marked?'marked':''} ${!wasCalled?'uncalled':''} ${winSet.has([r,c].join(','))?'win':''}" ${v===0||!called.includes(v)||G.status!=='running'?'disabled':''} onclick="toggleMark(${n},${v})" aria-label="Cartela ${n}, number ${v}">${v===0?'★':v}</button>`;
   })).join('');
-  const claimButton=(G.status==='running')?`<button type="button" class="danger wide" style="padding:10px;margin-top:10px" onclick="claim(${n})" ${G.my_suspended?'disabled':''}>${G.my_suspended?(L==='am'?'⛔ በዚህ ዙር ታግደዋል':'⛔ Suspended this round'):'🏆 BINGO! — Cartela #'+n}</button>`:'';
   const cancelButton=G.status==='waiting'?`<button type="button" class="secondary wide" onclick="cancelJoinedCartela(${n},${Number(entry.stake||document.getElementById('stake')?.value||2)})">${L==='am'?'❌ ካርቴላ ሰርዝ':'❌ Cancel Cartela'}</button>`:'';
   return `<div class="my-card-item"><div class="card-caption"><b>${t('cartelaLabel')} #${n}</b><span class="muted">${t('cartelaBet')} ${money(entry.stake||0)}</span></div><h3 class="live-bingo-heading">🏆 BINGO</h3><div class="bhead"><span>B</span><span>I</span><span>N</span><span>G</span><span>O</span></div><div class="card">${cells}</div>${cancelButton}</div>`;
  }).join('');
@@ -1061,20 +1088,21 @@ function toggleMark(cartela,n){
 async function claimActiveCartela(){
  const cards=G?.my_cartelas||((G?.my_cartela)?[{cartela_number:G.my_cartela_number}]:[]);
  if(!cards.length){msg(L==='am'?'ካርቴላ አልተመረጠም':'No joined cartela to claim',true);return;}
- // Keep the existing server-side claim path and pass the exact cartela number.
- await claim(Number(cards[0].cartela_number));
+ if(G?.status!=='running'){msg(L==='am'?'ጨዋታው ገና አልተጀመረም':'The game is not running yet.',true);return;}
+ const numbers=cards.map(c=>Number(c.cartela_number));
+ const marked_by_cartela={};
+ for(const n of numbers)marked_by_cartela[String(n)]=[...(manualMarksByCard[n]||new Set([0]))];
+ await claim(numbers,marked_by_cartela);
 }
-async function claim(cartela){
+async function claim(cartelaNumbers,markedByCartela={}){
  try{
-  const marks=manualMarksByCard[Number(cartela)]||new Set([0]);
-  const r=await api('/api/game/claim',{method:'POST',body:JSON.stringify({cartela_number:Number(cartela),marked:[...marks]})});
+  const r=await api('/api/game/claim',{method:'POST',body:JSON.stringify({cartela_numbers:Array.isArray(cartelaNumbers)?cartelaNumbers:[Number(cartelaNumbers)],marked_by_cartela:markedByCartela})});
   winCells=r.pattern||[];
-  document.getElementById('claimMsg').textContent=`🎉🏆 WINNER! Cartela #${r.cartela_number||cartela} — Prize: ${money(r.prize)} (80% of ${money(r.total_bets)} total bets)! 🎊`;
+  document.getElementById('claimMsg').textContent=`🎉🏆 WINNER! Cartela #${r.cartela_number} — Prize: ${money(r.prize)} (80% of ${money(r.total_bets)} total bets)! 🎊`;
   document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
   await refreshGame();await refreshWallet();telegramApp()?.HapticFeedback?.notificationOccurred('success');
  }catch(e){
-  const claimError=e.message;
-  await refreshGame().catch(()=>{});
+  const claimError=e.message;await refreshGame().catch(()=>{});
   document.getElementById('claimMsg').textContent=claimError;
   document.getElementById('claimMsg').className='notice err';document.getElementById('claimMsg').classList.remove('hidden');
  }
