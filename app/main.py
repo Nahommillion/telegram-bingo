@@ -236,8 +236,10 @@ async def who(req):
   phone=(await c.execute(text("SELECT phone_number FROM bingo_users WHERE telegram_id=:i"),{"i":int(u["id"])})).scalar_one_or_none()
  if not phone:raise HTTPException(403,"Please register your phone number with the bot first: send /start and share your own contact.")
  return u
-def newcard():
- cols=[random.sample(range(a,b+1),5) for a,b in [(1,15),(16,30),(31,45),(46,60),(61,75)]];g=[[cols[c][r] for c in range(5)] for r in range(5)];g[2][2]=0;return g
+def newcard(seed=None):
+ # Stable per game/cartela so the lobby preview is exactly the card used after joining.
+ rng=random.Random(seed) if seed is not None else random
+ cols=[rng.sample(range(a,b+1),5) for a,b in [(1,15),(16,30),(31,45),(46,60),(61,75)]];g=[[cols[c][r] for c in range(5)] for r in range(5)];g[2][2]=0;return g
 async def ensure_game_for_stake(stake):
  key=_stake_key(stake)
  if key in _games_by_stake: return _games_by_stake[key]
@@ -401,6 +403,12 @@ class Join(BaseModel):
 class CartelaReservation(BaseModel):
  cartela_number:int=Field(ge=1,le=200)
  stake:Decimal=Field(default=Decimal("2"),ge=Decimal("2"),le=Decimal("1000"))
+@app.get("/api/game/preview/{cartela_number}")
+async def preview_cartela(cartela_number:int,req:Request,stake:float=2):
+ await who(req)
+ if cartela_number<1 or cartela_number>200: raise HTTPException(400,"Cartela number must be between 1 and 200.")
+ await ensure_game_for_stake(stake)
+ return {"cartela_number":cartela_number,"cartela":newcard(f"{g['id']}:{cartela_number}")}
 @app.post("/api/game/reserve")
 async def reserve_cartela(b:CartelaReservation,req:Request):
  await ensure_game_for_stake(b.stake); _current_stake.set(_stake_key(b.stake))
@@ -446,7 +454,7 @@ async def join(b:Join,req:Request):
   nums=[n for n in nums if n not in already]
   if not nums: return {"ok":True,"cartelas":[{"cartela_number":p["n"],"cartela":p["card"]} for p in g["players"].values() if p.get("user_id")==uid],"lobby_seconds":g["seconds"]}
   total=(b.stake*len(nums)).quantize(Decimal("0.01"))
-  cards={n:newcard() for n in nums}
+  cards={n:newcard(f"{g['id']}:{n}") for n in nums}
   try:
    async with engine.begin() as c:
     game_row=(await c.execute(text("SELECT status,lobby_started_at FROM bingo_games WHERE id=:g FOR UPDATE"),{"g":g["id"]})).first()
@@ -477,49 +485,52 @@ async def join(b:Join,req:Request):
 async def claim(req:Request):
  u=await who(req);uid=int(u["id"])
  try:
-  body=await req.json()
-  raw_numbers=body.get("cartela_numbers")
-  if raw_numbers is None: raw_numbers=[body.get("cartela_number")]
-  numbers=list(dict.fromkeys(int(x) for x in raw_numbers if str(x).isdigit() and 1<=int(x)<=200))
- except Exception:
-  raise HTTPException(400,"Choose your cartelas before claiming BINGO.")
- if not numbers: raise HTTPException(400,"Choose at least one cartela to claim with.")
+  body=await req.json();number=int(body.get("cartela_number"));marked={int(x) for x in body.get("marked",[]) if str(x).isdigit()}
+ except Exception:raise HTTPException(400,"Choose the cartela you want to claim with.")
  async with engine.connect() as c:
-  matched=(await c.execute(text("SELECT ge.game_id,bg.stake_amount FROM bingo_game_entries ge JOIN bingo_games bg ON bg.id=ge.game_id WHERE ge.telegram_id=:u AND ge.cartela_number=:n AND bg.status='running' ORDER BY bg.id DESC LIMIT 1"),{"u":uid,"n":numbers[0]})).first()
- if not matched: raise HTTPException(409,"Your cartelas are not in a running game.")
+  matched=(await c.execute(text("SELECT ge.game_id,bg.stake_amount FROM bingo_game_entries ge JOIN bingo_games bg ON bg.id=ge.game_id WHERE ge.telegram_id=:u AND ge.cartela_number=:n AND bg.status='running' ORDER BY bg.id DESC LIMIT 1"),{"u":uid,"n":number})).first()
+ if not matched: raise HTTPException(409,"That cartela is not in a running game.")
  await ensure_game_for_stake(matched[1]); _current_stake.set(_stake_key(matched[1]))
  async with lock:
-  if g["id"]!=int(matched[0]) or g["status"]!="running": raise HTTPException(409,"Your cartela's game is no longer running. Refresh the game.")
-  owned_cards=[p for p in g["players"].values() if int(p.get("user_id",-1))==uid and int(p.get("n",0)) in numbers]
-  if not owned_cards: raise HTTPException(400,"Those cartelas are not yours in this game.")
+  if g["id"]!=int(matched[0]) or g["status"]!="running":raise HTTPException(409,"That cartela's game is no longer running. Refresh the game.")
+  p=g["players"].get(f"{uid}:{number}")
+  if not p:raise HTTPException(400,"That cartela is not yours in this game.")
   g.setdefault("suspended",set())
   async with engine.connect() as c:
    suspended_row=(await c.execute(text("SELECT 1 FROM bingo_game_suspensions WHERE game_id=:g AND telegram_id=:u"),{"g":g["id"],"u":uid})).first()
-  if suspended_row: g["suspended"].add(uid)
+  if suspended_row:
+   g["suspended"].add(uid)
   if uid in g["suspended"]:
    raise HTTPException(403,"You are suspended from claiming BINGO for the rest of this round because of an invalid claim.")
-  p=None;marked_line=None
-  for candidate in owned_cards:
-   line=winline(candidate["card"],g["called"])
-   if line:
-    p=candidate;marked_line=line;break
-  if p is None:
+  line=winline(p["card"],g["called"])
+  if not line:
    async with engine.begin() as c:
-    await c.execute(text("INSERT INTO bingo_game_suspensions(game_id,telegram_id,reason) VALUES(:g,:u,:r) ON CONFLICT DO NOTHING"),{"g":g["id"],"u":uid,"r":"BINGO claim had no completed winning line"})
+    await c.execute(text("INSERT INTO bingo_game_suspensions(game_id,telegram_id,reason) VALUES(:g,:u,:r) ON CONFLICT(game_id,telegram_id) DO NOTHING"),{"g":g["id"],"u":uid,"r":"BINGO claim had no completed winning line"})
    g["suspended"].add(uid)
    raise HTTPException(403,"False BINGO claim: you are suspended from claiming for the rest of this round.")
-  if g["winner"]: raise HTTPException(409,"Another player already won.")
+  # The server is authoritative: a claim is valid when the called numbers
+  # complete a winning line on this cartela. Do not require extra manual
+  # tapping of every cell; mobile clients may not have marked every called cell.
+  # The winline check above already rejects false claims and preserves suspension.
+  marked_line=line
+  if g["winner"]:raise HTTPException(409,"Another player already won.")
   entries=list(g["players"].values());pot=sum((Decimal(str(x["stake"])) for x in entries),Decimal("0.00"))
   distinct_players={int(x.get("user_id")) for x in entries if x.get("user_id") is not None}
-  if len(distinct_players)<2: prize=Decimal("0.00");commission=Decimal("0.00")
+  if len(distinct_players)<2:
+   prize=Decimal("0.00");commission=Decimal("0.00")
   else:
    prize=(pot*Decimal("0.80")).quantize(Decimal("0.01"));commission=(pot-prize).quantize(Decimal("0.01"))
   winner_result={"telegram_id":uid,"name":p["name"],"cartela_number":p["n"],"cartela":p["card"],"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"commission":float(commission)}
-  # Keep the existing atomic winner and wallet-ledger transaction unchanged.
+  # Commit the winner and all ledger changes together. Do not mutate the
+  # in-memory game until the database transaction succeeds; otherwise a DB
+  # error could leave the game looking finished without a credited prize.
   async with engine.begin() as c:
    won=(await c.execute(text("UPDATE bingo_games SET status='finished',finished_at=NOW(),winner_telegram_id=:u,called_numbers=CAST(:n AS jsonb) WHERE id=:g AND status='running' AND winner_telegram_id IS NULL RETURNING id"),{"u":uid,"n":json.dumps(g["called"]),"g":g["id"]})).scalar_one_or_none()
-   if won is None: raise HTTPException(409,"This game has already been won. Refresh for the result.")
+   if won is None:
+    raise HTTPException(409,"This game has already been won. Refresh for the result.")
    if prize:
+    # Targetless ON CONFLICT supports both legacy full unique constraints and
+    # the partial external_reference index created by newer deployments.
     txid=(await c.execute(text("INSERT INTO bingo_transactions(telegram_id,transaction_type,amount,status,description,external_reference) VALUES(:u,'win',:a,'verified',:d,:r) ON CONFLICT DO NOTHING RETURNING id"),{"u":uid,"a":prize,"d":f"Bingo prize (80% of {pot} Birr total bets)","r":f"bingo:game:{g['id']}:winner"})).scalar_one_or_none()
     if txid is not None:
      await c.execute(text("UPDATE bingo_wallets SET balance=balance+:a,updated_at=NOW() WHERE telegram_id=:u"),{"a":prize,"u":uid})
@@ -532,7 +543,7 @@ async def claim(req:Request):
    elif commission:
     await c.execute(text("UPDATE bingo_platform_wallet SET balance=balance+:a,updated_at=NOW() WHERE id=1"),{"a":commission})
   g["winner"]=winner_result;g["status"]="finished";g["finished_at_ts"]=time.time()
-  return {"ok":True,"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"platform_commission":float(commission),"winner_name":p["name"],"cartela_number":p["n"],"cartela":p["card"]}
+  return {"ok":True,"pattern":marked_line,"prize":float(prize),"total_bets":float(pot),"platform_commission":float(commission),"winner_name":p["name"],"cartela_number":p["n"]}
 @app.get("/api/public-payment-methods")
 async def public_payment_methods():
  # CBE Birr receiving numbers intentionally reuse the Telebirr phone numbers
