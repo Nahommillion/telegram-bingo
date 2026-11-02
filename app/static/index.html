@@ -1187,26 +1187,51 @@ function toggleMark(cartela,n){
 }
 async function claimActiveCartela(){
  const cards=G?.my_cartelas||((G?.my_cartela)?[{cartela_number:G.my_cartela_number}]:[]);
- if(!cards.length){msg(L==='am'?'ካርቴላ አልተመረጠም':'No joined cartela to claim',true);return;}
- // Keep the existing server-side claim path and pass the exact cartela number.
- await claim(Number(cards[0].cartela_number));
+ const numbers=[...new Set(cards.map(x=>Number(x.cartela_number)).filter(n=>Number.isInteger(n)&&n>=1&&n<=200))];
+
+ if(!numbers.length){
+  msg(L==='am'?'ካርቴላ አልተመረጠም':'No joined cartelas to claim',true);
+  return;
+ }
+
+ await claim(numbers);
 }
 async function claim(cartela){
  try{
-  const marks=manualMarksByCard[Number(cartela)]||new Set([0]);
-  const r=await api('/api/game/claim',{method:'POST',body:JSON.stringify({cartela_number:Number(cartela),marked:[...marks]})});
+  const numbers=(Array.isArray(cartela)?cartela:[cartela])
+   .map(Number)
+   .filter(n=>Number.isInteger(n)&&n>=1&&n<=200);
+
+  if(!numbers.length){
+   msg(L==='am'?'ካርቴላ አልተመረጠም':'No valid cartelas to check',true);
+   return;
+  }
+
+  const r=await api('/api/game/claim',{
+   method:'POST',
+   body:JSON.stringify({cartela_numbers:numbers})
+  });
+
   winCells=r.pattern||[];
-  document.getElementById('claimMsg').textContent=`🎉🏆 WINNER! Cartela #${r.cartela_number||cartela} — Prize: ${money(r.prize)} (80% of ${money(r.total_bets)} total bets)! 🎊`;
-  document.getElementById('claimMsg').className='notice';document.getElementById('claimMsg').classList.remove('hidden');
-  await refreshGame();await refreshWallet();telegramApp()?.HapticFeedback?.notificationOccurred('success');
+
+  const winnerNumber=r.cartela_number||'';
+
+  document.getElementById('claimMsg').textContent=
+   `🎉🏆 WINNER! Cartela #${winnerNumber} — Prize: ${money(r.prize)} (80% of ${money(r.total_bets)} total bets)! 🎊`;
+
+  document.getElementById('claimMsg').className='notice';
+  document.getElementById('claimMsg').classList.remove('hidden');
+
+  await refreshGame();
+  await refreshWallet();
+
+  telegramApp()?.HapticFeedback?.notificationOccurred('success');
+
  }catch(e){
-  const claimError=e.message;
   await refreshGame().catch(()=>{});
-  document.getElementById('claimMsg').textContent=claimError;
-  document.getElementById('claimMsg').className='notice err';document.getElementById('claimMsg').classList.remove('hidden');
+  msg(e.message,true);
  }
 }
-
 async function refreshWallet(){
   try{
     const w=await api('/api/wallet');
