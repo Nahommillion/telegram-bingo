@@ -394,7 +394,7 @@ body:has(#game.active.playing-mode){overflow:hidden!important;height:100dvh!impo
 </div>
 <div id="playing" class="hidden">
  <div class="title"><h3 id="yourCard">Your Cartela</h3><span class="pill" id="cardNum"></span></div>
- <div class="panel"><div class="joined-cartela-tools"><div id="joinedCartelaMessage" class="muted small"></div><div class="joined-cartela-buttons"><button type="button" class="danger" id="cancelJoinedAllBtn" onclick="releaseJoinedCartelasAndReturnSelection()">✖ Cancel</button><button type="button" class="secondary" id="selectAnotherCartelaBtn" onclick="releaseJoinedCartelasAndReturnSelection()">＋ Select Another Cartela</button></div></div><div class="chips recent-called hidden" id="recent"></div><div id="myCards"></div><div id="claimMsg" class="notice hidden"></div><div id="winnerCartela" class="hidden"></div></div>
+ <div class="panel"><div id="joinedCartelaMessage" class="joined-cartela-status"></div><div class="chips recent-called hidden" id="recent"></div><div id="myCards"></div><div id="claimMsg" class="notice hidden"></div><div id="winnerCartela" class="hidden"></div></div>
 </div>
 <div id="roundMessage" class="notice hidden">The game has started. Please choose a cartela in the next round.</div>
 </div></div></div>
@@ -468,7 +468,7 @@ body:has(#game.active.playing-mode){overflow:hidden!important;height:100dvh!impo
 <section class="screen" id="profile">
 <div class="title"><h3 id="profileTitle">Player Profile</h3></div>
 <div class="title"><h3 id="settings">Settings</h3></div>
-<div class="panel"><div class="row"><span data-en="🌐 Language" data-am="🌐 ቋንቋ">🌐 Language / ቋንቋ</span><button class="secondary" onclick="toggleLang()" data-en="English / አማርኛ" data-am="እንግሊዝኛ / አማርኛ">English / አማርኛ</button></div><div class="row"><span data-en="🆘 Support" data-am="🆘 ድጋፍ">🆘 Support</span><span class="muted small" data-en="Contact admin" data-am="አስተዳዳሪውን ያነጋግሩ">Contact admin</span></div><div class="support-links"><b>📞 Support & Community</b><p class="muted small">Telebirr support: use the verified receiving account shown in Wallet → Deposit. Never send money to an unverified number.</p><a href="https://t.me/Gofere_Habesha_Bingo" target="_blank" rel="noopener">📢 Telegram Channel</a><a href="https://t.me/Goferehabeshabingo" target="_blank" rel="noopener">👥 Telegram Group</a></div><div class="row"><span data-en="👥 Referrals" data-am="👥 ግብዣዎች">👥 Referrals</span><span class="pill" id="refCount">0</span></div></div>
+<div class="panel"><div class="row"><span data-en="🌐 Language" data-am="🌐 ቋንቋ">🌐 Language / ቋንቋ</span><button class="secondary" onclick="toggleLang()" data-en="English / አማርኛ" data-am="እንግሊዝኛ / አማርኛ">English / አማርኛ</button></div><button type="button" class="row support-trigger" onclick="toggleSupportContacts()" aria-expanded="false"><span data-en="🆘 Support" data-am="🆘 ድጋፍ">🆘 Support</span><span class="muted small" id="supportToggleHint" data-en="Tap to view contacts" data-am="ለማየት ይጫኑ">Tap to view contacts ▾</span></button><div class="support-links hidden" id="supportContacts"><b>📞 Support & Community</b><p class="muted small">Telebirr support: use the verified receiving account shown in Wallet → Deposit. Never send money to an unverified number.</p><a href="https://t.me/Gofere_Habesha_Bingo" target="_blank" rel="noopener">📢 Telegram Channel</a><a href="https://t.me/Goferehabeshabingo" target="_blank" rel="noopener">👥 Telegram Group</a></div><div class="row"><span data-en="👥 Referrals" data-am="👥 ግብዣዎች">👥 Referrals</span><span class="pill" id="refCount">0</span></div></div>
 </section>
 </div>
 
@@ -639,6 +639,8 @@ function depositStatus(s,bad=false){
   n.textContent=s;
   n.className='notice'+(bad?' err':'');
 }
+
+function toggleSupportContacts(){const box=document.getElementById('supportContacts');const hint=document.getElementById('supportToggleHint');const trigger=document.querySelector('.support-trigger');if(!box)return;const opening=box.classList.contains('hidden');box.classList.toggle('hidden',!opening);if(trigger)trigger.setAttribute('aria-expanded',String(opening));if(hint)hint.textContent=opening?'Hide contacts ▴':'Tap to view contacts ▾';}
 
 function go(id){
   document.body.classList.toggle('home-screen',id==='home');
@@ -892,8 +894,7 @@ async function refreshGame(){
   const lobbyStake=Number(document.getElementById('stake')?.value||2);
   G=await api('/api/game?stake='+encodeURIComponent(Number.isFinite(lobbyStake)&&lobbyStake>=2&&lobbyStake<=1000?lobbyStake:2));
   const statusEl=document.getElementById('status');if(statusEl)statusEl.textContent=t(G.status);
-  const joinedMessage=document.getElementById('joinedCartelaMessage');if(joinedMessage){const nums=(G.my_cartelas||[]).map(x=>'#'+x.cartela_number);joinedMessage.textContent=nums.length?`${L==='am'?'የተመረጡ ካርቴላዎች':'Chosen cartela'}: ${nums.join(', ')} • ${L==='am'?'ቀሪ ጊዜ':'Countdown'}: ${document.getElementById('timer')?.textContent||'--:--'}`:'';}
-  const cancelAll=document.getElementById('cancelJoinedAllBtn'),another=document.getElementById('selectAnotherCartelaBtn');if(cancelAll)cancelAll.disabled=G.status!=='waiting';if(another)another.disabled=G.status!=='waiting';
+  const joinedMessage=document.getElementById('joinedCartelaMessage');if(joinedMessage){const nums=(G.my_cartelas||[]).map(x=>'#'+x.cartela_number);joinedMessage.textContent=nums.length?`${L==='am'?'የተመረጡ ካርቴላዎች':'Chosen cartela'}: ${nums.join(', ')}  •  ${L==='am'?'ቀሪ ጊዜ':'Countdown'}: ${document.getElementById('timer')?.textContent||'--:--'}`:'';}
   const gameStatusEl=document.getElementById('gameStatus');if(gameStatusEl)gameStatusEl.textContent=t(G.status);
   const gameIdEl=document.getElementById('gameId');if(gameIdEl)gameIdEl.textContent='#'+G.id;
   const homePlayersEl=document.getElementById('homePlayers');if(homePlayersEl)homePlayersEl.textContent=G.player_count;
@@ -1517,4 +1518,12 @@ body:not(.home-screen) #langBtn,body:not(.home-screen) .lang{display:none!import
 .joined-cartela-buttons{display:flex;flex-wrap:wrap;gap:5px}
 .joined-cartela-buttons button{width:auto!important;min-height:27px!important;padding:4px 8px!important;margin:0!important;font-size:10px!important;border-radius:7px!important}
 .joined-cartela-buttons button:disabled{opacity:.45}
+</style>
+
+<style id="support-and-joined-message-fix">
+.support-trigger{width:100%;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:12px 4px;font:inherit}
+.support-links.hidden{display:none!important}
+.joined-cartela-status{margin:0 0 8px;padding:9px 10px;border:1px solid #31576b;border-radius:10px;background:#0b2032;color:#ffd447;font-size:12px;line-height:1.4;font-weight:800;text-align:center}
+.joined-cartela-status:empty{display:none}
+@media(max-width:700px){#wallet.active,#leaderboard.active{padding-top:0!important;margin-top:-8px!important}#wallet.active>.title,#leaderboard.active>.title{margin:0 0 8px!important;padding:0!important}#wallet.active>.title h3,#leaderboard.active>.title h3{margin-top:0!important}}
 </style>
