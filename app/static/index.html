@@ -395,7 +395,7 @@ body:has(#game.active.playing-mode){overflow:hidden!important;height:100dvh!impo
 </div>
 <div id="playing" class="hidden">
  <div class="title"><h3 id="yourCard">Your Cartela</h3><span class="pill" id="cardNum"></span></div>
- <div class="panel"><div id="joinedCartelaMessage" class="joined-cartela-status"></div><div class="chips recent-called hidden" id="recent"></div><div id="myCards"></div><div id="claimMsg" class="notice hidden"></div><div id="winnerCartela" class="hidden"></div></div>
+ <div class="panel"><div id="joinedCartelaMessage" class="joined-cartela-status"></div><div class="chips recent-called hidden" id="recent"></div><div id="liveLastCall" class="live-last-call" aria-live="polite"></div><div id="myCards"></div><div id="claimMsg" class="notice hidden"></div><div id="winnerCartela" class="hidden"></div></div>
 </div>
 <div id="roundMessage" class="notice hidden">The game has started. Please choose a cartela in the next round.</div>
 </div></div></div>
@@ -918,6 +918,7 @@ async function refreshGame(){
   const last=G.called.length?G.called[G.called.length-1]:null;
   const hasNewCall=G.called.length>lastSoundedCount;
   if(G.status==='waiting'&&G.called.length===0)lastSoundedCount=0;
+  const liveLastCall=document.getElementById('liveLastCall');if(liveLastCall)liveLastCall.textContent=last===null?(L==='am'?'ቁጥር እየጠበቅን':'Waiting for number'):(L==='am'?'የተጠራ ቁጥር፦ ':'Called number: ')+callLabel(last);
   const lastNumberEl=document.getElementById('lastNumber');if(lastNumberEl){lastNumberEl.textContent=last===null?'?':String(last);lastNumberEl.setAttribute('aria-label',last===null?t('waitingFirstNumber'):'Current called number '+callLabel(last));}
   const lastLabelEl=document.getElementById('lastLabel');if(lastLabelEl)lastLabelEl.textContent=last===null?t('waitingFirstNumber'):callLabel(last);
   const allCalledEl=document.getElementById('allCalled');if(allCalledEl)allCalledEl.innerHTML=G.called.slice().reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('')||t('empty');
@@ -1560,4 +1561,17 @@ body:not(.home-screen) #langBtn,body:not(.home-screen) .lang{display:none!import
 @keyframes ringPulse{from{transform:scale(1)}to{transform:scale(1.035)}}.reservation-panel p{font-size:12px;color:#c2d4df;margin:6px 0 12px}.reservation-actions{display:flex;justify-content:center;gap:8px}.reservation-actions button{width:auto!important;min-height:34px!important;padding:7px 12px!important;font-size:11px!important;border-radius:8px!important}
 .support-account{display:grid;gap:5px;padding:9px;border:1px solid #31576b;border-radius:8px;background:#102b40;font-size:12px}.support-account strong{color:#ffd447}.support-account small{color:#a9c3d0;margin-top:3px}
 #selectArea.hidden{display:none!important}
+</style>
+
+<style id="selection-reservation-live-call-refinement">
+/* Keep the reservation card on the selection stage; a tiny call indicator belongs above live cartelas. */
+#game.active.playing-mode #liveLastCall{display:block!important;text-align:center!important;margin:2px auto 5px!important;padding:2px 6px!important;font-size:clamp(9px,2.5vw,12px)!important;line-height:1.15!important;color:#ffd447!important;font-weight:800!important;max-width:100%!important}
+#game.active:not(.playing-mode) #liveLastCall{display:none!important}
+.reservation-panel{max-width:340px!important;margin:8px auto!important;padding:10px!important}
+.reservation-title{font-size:14px!important;margin-bottom:4px!important}
+.countdown-ring{width:92px!important;height:92px!important;margin:5px auto 7px!important}
+.countdown-ring:before{inset:6px!important}.countdown-ring strong{font-size:28px!important}
+.reservation-cartelas{font-size:12px!important;margin:3px 0 7px!important}
+.reservation-panel p{margin:4px 0 7px!important}
+.reservation-actions button{min-height:30px!important;padding:5px 9px!important;font-size:10px!important}
 </style>
