@@ -919,7 +919,7 @@ async function refreshGame(){
   const last=G.called.length?G.called[G.called.length-1]:null;
   const hasNewCall=G.called.length>lastSoundedCount;
   if(G.status==='waiting'&&G.called.length===0)lastSoundedCount=0;
-  const liveLastCall=document.getElementById('liveLastCall');if(liveLastCall)liveLastCall.textContent=last===null?(L==='am'?'ቁጥር እየጠበቅን':'Waiting for number'):(L==='am'?'የተጠራ ቁጥር፦ ':'Called number: ')+callLabel(last);
+  const liveLastCall=document.getElementById('liveLastCall');if(liveLastCall){liveLastCall.textContent=last===null?'':callLabel(last);liveLastCall.classList.toggle('has-call',last!==null);}
   const lastNumberEl=document.getElementById('lastNumber');if(lastNumberEl){lastNumberEl.textContent=last===null?'?':String(last);lastNumberEl.setAttribute('aria-label',last===null?t('waitingFirstNumber'):'Current called number '+callLabel(last));}
   const lastLabelEl=document.getElementById('lastLabel');if(lastLabelEl)lastLabelEl.textContent=last===null?t('waitingFirstNumber'):callLabel(last);
   const allCalledEl=document.getElementById('allCalled');if(allCalledEl)allCalledEl.innerHTML=G.called.slice().reverse().map(n=>`<span class="chip">${callLabel(n)}</span>`).join('')||t('empty');
@@ -932,12 +932,17 @@ async function refreshGame(){
   for(const n of ownReservations)selectedCartelas.add(n);
   for(const n of [...selectedCartelas])if(!ownReservations.includes(Number(n))&&!pendingCartelas.has(Number(n)))selectedCartelas.delete(n);
   const mine=G.my_cartelas||((G.my_cartela)?[{cartela:G.my_cartela,cartela_number:G.my_cartela_number,stake:0}]:[]);
-  const gameEl=document.getElementById('game');if(gameEl)gameEl.classList.toggle('playing-mode',mine.length>0);
+  const gameEl=document.getElementById('game');if(gameEl)gameEl.classList.toggle('playing-mode',mine.length>0 && !(reservationPending && G.status==='waiting'));
   const roundMessage=document.getElementById('roundMessage');
   if(roundMessage){roundMessage.textContent=L==='am'?'ጨዋታው ተጀምሯል። እባክዎ በሚቀጥለው ዙር ካርቴላ ይምረጡ።':'The game has started. Please choose a cartela in the next round.';roundMessage.classList.toggle('hidden',!!mine.length||G.status==='waiting'||G.status==='finished');}
   if(mine.length && reservationPending && G.status==='waiting'){
-    document.getElementById('selectArea').classList.add('hidden');document.getElementById('playing').classList.add('hidden');
-    document.getElementById('reservationPanel')?.classList.remove('hidden');showReservationPanel();updateReservationCountdown();
+    const selectArea=document.getElementById('selectArea');
+    selectArea?.classList.remove('hidden');
+    selectArea?.classList.add('reservation-stage');
+    document.getElementById('playing').classList.add('hidden');
+    document.getElementById('reservationPanel')?.classList.remove('hidden');
+    showReservationPanel();
+    updateReservationCountdown();
   }else if(mine.length){
     document.getElementById('reservationPanel')?.classList.add('hidden');
     document.getElementById('selectArea').classList.add('hidden');
@@ -1585,4 +1590,24 @@ body:not(.home-screen) #langBtn,body:not(.home-screen) .lang{display:none!import
 .reservation-panel{position:relative;z-index:20;margin:8px auto!important;max-width:300px!important}
 .countdown-ring{background:conic-gradient(var(--called-color,#ffd447) var(--progress),#24485a 0)!important}
 .countdown-ring strong{font-variant-numeric:tabular-nums}
+</style>
+
+
+<style id="actual-selection-stage-state-fix">
+/* Reservation is a distinct selection-stage state, never the live-game state. */
+#game.active:not(.playing-mode) #reservationPanel:not(.hidden){display:block!important}
+#game.active:not(.playing-mode) #selectArea.reservation-stage{display:block!important}
+#game.active:not(.playing-mode) #selectArea.reservation-stage #choices,
+#game.active:not(.playing-mode) #selectArea.reservation-stage #selectedCardPreviews{display:none!important}
+#game.active:not(.playing-mode) #selectArea.reservation-stage .panel{display:none!important}
+#game.active.playing-mode #reservationPanel,
+#game.active.playing-mode #joinedCartelaMessage{display:none!important}
+#game.active.playing-mode #liveLastCall{display:flex!important;align-items:center;justify-content:center;width:clamp(30px,7vw,42px);height:clamp(30px,7vw,42px);padding:0!important;margin:3px auto 6px!important;border-radius:50%!important;background:#f4c542!important;color:#102536!important;border:2px solid #fff!important;font-size:clamp(11px,3vw,15px)!important;font-weight:1000!important;line-height:1!important;box-shadow:0 2px 8px #0005!important}
+#game.active.playing-mode #liveLastCall:not(.has-call){display:none!important}
+#game.active:not(.playing-mode) .game-workspace{display:block!important}
+#game.active:not(.playing-mode) .game-workspace .cartela-side{width:100%!important;max-width:100%!important}
+#game.active:not(.playing-mode) #selectArea:not(.reservation-stage) .cardgrid{max-height:42dvh!important;overflow:auto!important}
+#game.active:not(.playing-mode) #selectArea:not(.reservation-stage) .panel{padding:6px!important}
+#game.active:not(.playing-mode) #selectArea:not(.reservation-stage) #choices{gap:4px!important}
+#game.active:not(.playing-mode) #selectArea:not(.reservation-stage) #choices .pick{min-height:30px!important;padding:3px!important}
 </style>
