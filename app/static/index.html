@@ -391,8 +391,9 @@ body:has(#game.active.playing-mode){overflow:hidden!important;height:100dvh!impo
   <div id="selectedCardPreviews" class="selected-card-previews"></div>
   <div class="selection-summary"><span id="selectedLabel">Selected cartela</span><strong id="selectedCartelaLabel">None</strong></div>
  </div>
- <div id="reservationPanel" class="reservation-panel hidden"><div class="reservation-title">🎟️ Cartela reserved</div><div id="reservationCartelas" class="reservation-cartelas"></div><div class="countdown-ring" id="reservationRing"><div><strong id="reservationSeconds">30</strong><small>SECONDS</small></div></div><p id="reservationCountdownText">Your game starts when the countdown ends.</p><div class="reservation-actions"><button type="button" class="danger" onclick="cancelReservationFromSelection()">✖ Cancel Cartela</button><button type="button" class="primary" onclick="continueToLiveGame()">▶ Continue</button></div></div>
+
 </div>
+ <div id="reservationPanel" class="reservation-panel hidden"><div class="reservation-title">🎟️ Cartela reserved</div><div id="reservationCartelas" class="reservation-cartelas"></div><div class="countdown-ring" id="reservationRing"><div><strong id="reservationSeconds">30</strong><small>SECONDS</small></div></div><p id="reservationCountdownText">Your game starts when the countdown ends.</p><div class="reservation-actions"><button type="button" class="danger" onclick="cancelReservationFromSelection()">✖ Cancel Cartela</button><button type="button" class="primary" onclick="continueToLiveGame()">▶ Continue</button></div></div>
 <div id="playing" class="hidden">
  <div class="title"><h3 id="yourCard">Your Cartela</h3><span class="pill" id="cardNum"></span></div>
  <div class="panel"><div id="joinedCartelaMessage" class="joined-cartela-status"></div><div class="chips recent-called hidden" id="recent"></div><div id="liveLastCall" class="live-last-call" aria-live="polite"></div><div id="myCards"></div><div id="claimMsg" class="notice hidden"></div><div id="winnerCartela" class="hidden"></div></div>
@@ -942,14 +943,14 @@ async function refreshGame(){
     document.getElementById('selectArea').classList.add('hidden');
     document.getElementById('playing').classList.remove('hidden');
     document.getElementById('cardNum').textContent=mine.length+' cartela(s)';
-    document.getElementById('chooseDesc').textContent=G.status==='waiting'?t('reservedStarts')+' '+G.lobby_seconds+' '+t('seconds')+'.':G.status==='running'?t('liveInstructions'):t('roundFinished');
+    document.getElementById('chooseDesc').textContent=G.status==='waiting'?'':G.status==='running'?t('liveInstructions'):t('roundFinished');
     renderCards(mine,G.called,winCells);
   }else if(G.status==='waiting'){
-    reservationPending=false;document.getElementById('reservationPanel')?.classList.add('hidden');document.getElementById('selectArea').classList.remove('hidden');
+    reservationPending=false;document.getElementById('selectArea')?.classList.remove('reservation-stage');document.getElementById('reservationPanel')?.classList.add('hidden');document.getElementById('selectArea').classList.remove('hidden');
     document.getElementById('playing').classList.add('hidden');
     renderChoices();
   }else{
-    reservationPending=false;document.getElementById('reservationPanel')?.classList.add('hidden');document.getElementById('selectArea').classList.remove('hidden');
+    reservationPending=false;document.getElementById('selectArea')?.classList.remove('reservation-stage');document.getElementById('reservationPanel')?.classList.add('hidden');document.getElementById('selectArea').classList.remove('hidden');
     document.getElementById('playing').classList.add('hidden');
     renderChoices();
   }
@@ -1048,12 +1049,13 @@ async function startSelectedGame(){
  if(!Number.isFinite(stake)||stake<2||stake>1000){msg(t('minimumBetError'),true);return;}
  const picked=[...selectedCartelas].sort((a,b)=>a-b);
  if(!window.confirm((L==='am'?'እርግጠኛ ነዎት? ካርቴላ: ':'Are you sure you want to play with cartela(s): ')+picked.map(n=>'#'+n).join(', ')+'?'))return;
+ reservationPending=true;
  await joinGame(picked,stake);
  if((G?.my_cartelas||[]).length)go('game');
 }
 function showReservationPanel(){
  const panel=document.getElementById('reservationPanel');const area=document.getElementById('selectArea');const mine=G?.my_cartelas||[];
- if(!panel)return;reservationPending=true;area?.classList.add('hidden');panel.classList.remove('hidden');
+ if(!panel)return;reservationPending=true;area?.classList.add('reservation-stage');panel.classList.remove('hidden');
  const nums=mine.map(x=>'#'+x.cartela_number);const label=document.getElementById('reservationCartelas');if(label)label.textContent=(L==='am'?'የተመረጡ ካርቴላዎች፦ ':'Chosen cartela(s): ')+nums.join(', ');
  updateReservationCountdown();
 }
@@ -1062,11 +1064,11 @@ function updateReservationCountdown(){
  if(n)n.textContent=String(seconds);if(text)text.textContent=L==='am'?`ጨዋታው በ${seconds} ሰከንድ ውስጥ ይጀምራል።`:`Your game starts in ${seconds} seconds.`;
  if(ring)ring.style.setProperty('--progress',`${Math.max(0,Math.min(100,seconds/30*100))}%`);
 }
-async function continueToLiveGame(){reservationPending=false;document.getElementById('reservationPanel')?.classList.add('hidden');await refreshGame();}
+async function continueToLiveGame(){reservationPending=false;document.getElementById('selectArea')?.classList.remove('reservation-stage');document.getElementById('reservationPanel')?.classList.add('hidden');await refreshGame();}
 async function cancelReservationFromSelection(){
  if(G?.status!=='waiting'){msg(L==='am'?'ጨዋታው ተጀምሯል፤ ካርቴላ መሰረዝ አይቻልም።':'The game has started; cartelas can no longer be cancelled.',true);return;}
  const cards=G?.my_cartelas||[];for(const entry of cards){await api('/api/game/release',{method:'POST',body:JSON.stringify({cartela_number:Number(entry.cartela_number),stake:Number(entry.stake||currentLobbyStake||2)})});}
- reservationPending=false;document.getElementById('reservationPanel')?.classList.add('hidden');await refreshGame();
+ reservationPending=false;document.getElementById('selectArea')?.classList.remove('reservation-stage');document.getElementById('reservationPanel')?.classList.add('hidden');await refreshGame();
 }
 
 async function joinGame(nums,stake){
@@ -1574,4 +1576,13 @@ body:not(.home-screen) #langBtn,body:not(.home-screen) .lang{display:none!import
 .reservation-cartelas{font-size:12px!important;margin:3px 0 7px!important}
 .reservation-panel p{margin:4px 0 7px!important}
 .reservation-actions button{min-height:30px!important;padding:5px 9px!important;font-size:10px!important}
+</style>
+
+<style id="requested-selection-stage-correction">
+#selectArea.reservation-stage>.title,#selectArea.reservation-stage>.panel>*:not(#choices){display:none!important}
+#selectArea.reservation-stage>.panel{padding:0!important;margin:0!important;border:0!important;background:transparent!important}
+#selectArea.reservation-stage #choices{display:none!important}
+.reservation-panel{position:relative;z-index:20;margin:8px auto!important;max-width:300px!important}
+.countdown-ring{background:conic-gradient(var(--called-color,#ffd447) var(--progress),#24485a 0)!important}
+.countdown-ring strong{font-variant-numeric:tabular-nums}
 </style>
