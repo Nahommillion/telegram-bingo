@@ -386,14 +386,14 @@ body:has(#game.active.playing-mode){overflow:hidden!important;height:100dvh!impo
   <label class="small muted" id="stakeLabel">Bet per cartela (minimum 2 Birr)</label>
   <input id="stake" class="field" type="number" min="2" max="1000" step="0.01" value="2" oninput="updateSelectionSummary()" onchange="changeStakeLobby()">
   <div class="muted small" id="betSummary">Select cartelas to calculate your total bet.</div>
-  <button class="primary" id="startGameBtn" onclick="startSelectedGame()" disabled>🎮 Start Game</button><button class="danger wide" type="button" onclick="cancelCartelaSelection()">✖ Cancel selection</button>
+  <div class="selection-top-actions"><button class="primary" id="startGameBtn" onclick="startSelectedGame()" disabled>🎮 Start Game</button><button class="danger wide" type="button" onclick="cancelCartelaSelection()">✖ Cancel selection</button></div>
   <div class="cardgrid" id="choices"></div>
   <div id="selectedCardPreviews" class="selected-card-previews"></div>
   <div class="selection-summary"><span id="selectedLabel">Selected cartela</span><strong id="selectedCartelaLabel">None</strong></div>
  </div>
 
 </div>
- <div id="reservationPanel" class="reservation-panel hidden"><div class="reservation-title">🎟️ Cartela reserved</div><div id="reservationCartelas" class="reservation-cartelas"></div><div class="countdown-ring" id="reservationRing"><div><strong id="reservationSeconds">30</strong><small>SECONDS</small></div></div><p id="reservationCountdownText">Your game starts when the countdown ends.</p><div class="reservation-actions"><button type="button" class="danger" onclick="cancelReservationFromSelection()">✖ Cancel Cartela</button><button type="button" class="primary" onclick="continueToLiveGame()">▶ Continue</button></div></div>
+ <div id="reservationPanel" class="reservation-panel hidden" role="dialog" aria-modal="true" aria-labelledby="reservationTitle"><div class="reservation-title" id="reservationTitle">🎉 Get ready!</div><div id="reservationCartelas" class="reservation-cartelas"></div><div class="countdown-ring" id="reservationRing"><div><strong id="reservationSeconds">30</strong><small>SECONDS</small></div></div><p id="reservationCountdownText">Your game starts when the countdown ends.</p><div class="reservation-actions"><button type="button" class="danger" onclick="cancelReservationFromSelection()">✖ Cancel game</button><button type="button" class="primary prize-action" id="reservationPrizeButton">🏆 WINNER GETS</button></div></div>
 <div id="playing" class="hidden">
  <div class="title"><h3 id="yourCard">Your Cartela</h3><span class="pill" id="cardNum"></span></div>
  <div class="panel"><div id="joinedCartelaMessage" class="joined-cartela-status"></div><div class="chips recent-called hidden" id="recent"></div><div id="liveLastCall" class="live-last-call" aria-live="polite"></div><div id="myCards"></div><div id="claimMsg" class="notice hidden"></div><div id="winnerCartela" class="hidden"></div></div>
@@ -482,10 +482,11 @@ body:has(#game.active.playing-mode){overflow:hidden!important;height:100dvh!impo
 
 </nav>
 <div id="activeGameControls" class="active-game-controls" aria-label="Active game controls">
- <button type="button" class="secondary" onclick="go('home')">↩ Leave</button>
- <button type="button" class="secondary" onclick="refreshGame().catch(e=>msg(e.message,true))">↻ Refresh</button>
- <button type="button" class="secondary sound-icon" id="soundToggle" aria-label="Toggle called-number sound" title="Toggle called-number sound" onclick="toggleCallSound()">🔇</button>
- <button type="button" class="danger" id="activeBingoBtn" onclick="claimActiveCartela()">🏆 BINGO!</button>
+ <button type="button" class="secondary selection-only-control" id="selectionLeaveBtn" onclick="leaveCartelaSelection()">↩ Leave</button>
+ <button type="button" class="secondary selection-only-control" id="selectionRefreshBtn" onclick="refreshGame().catch(e=>msg(e.message,true))">↻ Refresh</button>
+ <button type="button" class="primary selection-only-control" id="selectionStartBtn" onclick="startSelectedGame()" disabled>🎮 Start</button>
+ <button type="button" class="secondary sound-icon playing-only-control" id="soundToggle" aria-label="Toggle called-number sound" title="Toggle called-number sound" onclick="toggleCallSound()">🔇</button>
+ <button type="button" class="danger playing-only-control" id="activeBingoBtn" onclick="claimActiveCartela()">🏆 BINGO!</button>
 </div>
 
 <script>
@@ -998,7 +999,9 @@ function renderChoices(){
  renderSelectedPreviews();
  document.getElementById('availableCount').textContent=available+' '+t('availableSuffix');
  updateSelectionSummary();
- document.getElementById('startGameBtn').disabled=!selectedCartelas.size||[...selectedCartelas].some(n=>taken.has(n)||pendingCartelas.has(n))||G?.status!=='waiting'||busy;
+ const canStart=!!selectedCartelas.size&&![...selectedCartelas].some(n=>taken.has(n)||pendingCartelas.has(n))&&G?.status==='waiting'&&!busy;
+ const topStart=document.getElementById('startGameBtn');if(topStart)topStart.disabled=!canStart;
+ const bottomStart=document.getElementById('selectionStartBtn');if(bottomStart)bottomStart.disabled=!canStart;
  if(G?.status!=='waiting'&&!((G?.my_cartelas||[]).length)){const help=document.getElementById('cartelaHelp');if(help)help.textContent=L==='am'?'ጨዋታው ተጀምሯል። ካርቴላዎችን ማየት ይችላሉ፤ መምረጥ ግን ከዙሩ በኋላ ብቻ ነው።':'The game has already started. You can view cartelas, but please choose one after this round finishes.';}else{const help=document.getElementById('cartelaHelp');if(help)help.textContent=t('cartelaHelp');}
 }
 async function renderSelectedPreviews(){
@@ -1068,8 +1071,15 @@ function updateReservationCountdown(){
  const seconds=Math.max(0,Number(G?.lobby_seconds)||0);const n=document.getElementById('reservationSeconds');const text=document.getElementById('reservationCountdownText');const ring=document.getElementById('reservationRing');
  if(n)n.textContent=String(seconds);if(text)text.textContent=L==='am'?`ጨዋታው በ${seconds} ሰከንድ ውስጥ ይጀምራል።`:`Your game starts in ${seconds} seconds.`;
  if(ring)ring.style.setProperty('--progress',`${Math.max(0,Math.min(100,seconds/30*100))}%`);
+ const prizeButton=document.getElementById('reservationPrizeButton');if(prizeButton){const prize=money(G?.prize_amount||0);prizeButton.textContent=L==='am'?`🏆 ደራሽ: ${prize}`:`🏆 WINNER GETS: ${prize}`;}
 }
 async function continueToLiveGame(){reservationPending=false;document.getElementById('selectArea')?.classList.remove('reservation-stage');document.getElementById('reservationPanel')?.classList.add('hidden');await refreshGame();}
+async function leaveCartelaSelection(){
+ if(reservationPending && (G?.my_cartelas||[]).length){await cancelReservationFromSelection();go('home');return;}
+ await cancelCartelaSelection();
+ go('home');
+}
+
 async function cancelReservationFromSelection(){
  if(G?.status!=='waiting'){msg(L==='am'?'ጨዋታው ተጀምሯል፤ ካርቴላ መሰረዝ አይቻልም።':'The game has started; cartelas can no longer be cancelled.',true);return;}
  const cards=G?.my_cartelas||[];for(const entry of cards){await api('/api/game/release',{method:'POST',body:JSON.stringify({cartela_number:Number(entry.cartela_number),stake:Number(entry.stake||currentLobbyStake||2)})});}
@@ -1077,7 +1087,7 @@ async function cancelReservationFromSelection(){
 }
 
 async function joinGame(nums,stake){
- if(busy)return;busy=true;document.getElementById('startGameBtn').disabled=true;
+ if(busy)return;busy=true;document.getElementById('startGameBtn').disabled=true;const bottomStart=document.getElementById('selectionStartBtn');if(bottomStart)bottomStart.disabled=true;
  try{
   await api('/api/game/join',{method:'POST',body:JSON.stringify({cartela_numbers:nums,stake})});currentLobbyStake=stake;
   winCells=[];for(const n of nums)manualMarksByCard[n]=new Set([0]);
@@ -1610,4 +1620,52 @@ body:not(.home-screen) #langBtn,body:not(.home-screen) .lang{display:none!import
 #game.active:not(.playing-mode) #selectArea:not(.reservation-stage) .panel{padding:6px!important}
 #game.active:not(.playing-mode) #selectArea:not(.reservation-stage) #choices{gap:4px!important}
 #game.active:not(.playing-mode) #selectArea:not(.reservation-stage) #choices .pick{min-height:30px!important;padding:3px!important}
+</style>
+
+<style id="cartela-selection-live-screen-layout">
+/* Cartela selection focused layout. Live-game layout is intentionally unchanged. */
+body:has(#game.active:not(.playing-mode)) .bottom{display:none!important}
+body:has(#game.active:not(.playing-mode)) .top{display:none!important}
+body:has(#game.active:not(.playing-mode)) .active-game-controls{display:grid!important;grid-template-columns:1fr 1fr 1.2fr!important;gap:7px!important;padding:7px max(9px,env(safe-area-inset-right)) calc(7px + env(safe-area-inset-bottom)) max(9px,env(safe-area-inset-left))!important}
+#game.active:not(.playing-mode) #activeGameControls .selection-only-control{display:flex!important;align-items:center;justify-content:center}
+#game.active:not(.playing-mode) #activeGameControls .playing-only-control{display:none!important}
+#game.active:not(.playing-mode) #activeGameControls button{min-height:42px!important;height:auto!important;font-size:clamp(12px,3vw,14px)!important;padding:9px 5px!important}
+#game.active:not(.playing-mode)>.title{display:none!important}
+#game.active:not(.playing-mode)>.panel.center{margin:0!important;padding:10px 8px 6px!important;border-radius:0 0 12px 12px!important}
+#game.active:not(.playing-mode)>.panel.center #chooseDesc{display:none!important}
+#game.active:not(.playing-mode)>.panel.center .compact-stats{display:flex!important;justify-content:center!important;align-items:center!important;margin:0 auto!important;width:100%!important}
+#game.active:not(.playing-mode)>.panel.center .compact-stats .stat{display:none!important}
+#game.active:not(.playing-mode)>.panel.center .compact-stats .stat:first-child{display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;width:100%!important;max-width:220px!important;padding:5px!important}
+#game.active:not(.playing-mode)>.panel.center .compact-stats .stat:first-child span{font-size:11px!important;letter-spacing:1px!important}
+#game.active:not(.playing-mode)>.panel.center .compact-stats .stat:first-child strong{font-size:clamp(23px,6vw,32px)!important;line-height:1.1!important;color:#ffd447!important}
+#game.active:not(.playing-mode)>.panel.center .called-stat-row{display:none!important}
+#game.active:not(.playing-mode) .game-workspace{display:block!important;padding:4px 5px 72px!important;margin:0!important}
+#game.active:not(.playing-mode) .game-workspace .called-side{display:none!important}
+#game.active:not(.playing-mode) .game-workspace .cartela-side{display:block!important;width:100%!important;max-width:100%!important;max-height:none!important;overflow:visible!important;padding:0!important}
+#game.active:not(.playing-mode) #selectArea>.title{display:none!important}
+#game.active:not(.playing-mode) #selectArea>.panel{display:flex!important;flex-direction:column!important;gap:5px!important;padding:6px!important}
+#game.active:not(.playing-mode) #selectArea #stake,
+#game.active:not(.playing-mode) #selectArea #stakeLabel,
+#game.active:not(.playing-mode) #selectArea #cartelaHelp,
+#game.active:not(.playing-mode) #selectArea #betSummary{display:none!important}
+#game.active:not(.playing-mode) #selectArea .selection-top-actions{display:none!important}
+#game.active:not(.playing-mode) #selectArea .cardgrid{order:1!important;display:grid!important;grid-template-columns:repeat(10,minmax(0,1fr))!important;gap:3px!important;max-height:45dvh!important;overflow-y:auto!important;padding:3px!important}
+#game.active:not(.playing-mode) #selectArea .pick{min-width:0!important;min-height:clamp(28px,5.3vw,40px)!important;padding:3px 1px!important;font-size:clamp(10px,2.6vw,14px)!important}
+#game.active:not(.playing-mode) #selectArea #selectedCardPreviews{order:2!important}
+#game.active:not(.playing-mode) #selectArea .selection-summary{order:3!important;display:flex!important;align-items:center!important;justify-content:space-between!important;gap:8px!important;margin:5px 1px!important;padding:8px!important}
+#game.active:not(.playing-mode) #selectArea #selectedCartelaLabel{white-space:normal!important;overflow-wrap:anywhere!important;text-align:right!important}
+#game.active:not(.playing-mode) #reservationPanel:not(.hidden){display:flex!important;position:fixed!important;inset:0!important;z-index:250!important;max-width:none!important;width:100%!important;height:100dvh!important;box-sizing:border-box!important;margin:0!important;padding:18px 18px calc(90px + env(safe-area-inset-bottom))!important;border:0!important;border-radius:0!important;background:rgba(3,12,22,.68)!important;backdrop-filter:blur(3px)!important;box-shadow:none!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:12px!important}
+#game.active:not(.playing-mode) #reservationPanel .reservation-title{font-size:clamp(18px,5vw,25px)!important;font-weight:900!important;color:#fff!important}
+#game.active:not(.playing-mode) #reservationPanel .reservation-cartelas{font-size:13px!important;color:#e6f2fa!important}
+#game.active:not(.playing-mode) #reservationPanel .countdown-ring{width:clamp(145px,42vw,190px)!important;height:clamp(145px,42vw,190px)!important;border-radius:50%!important;display:grid!important;place-items:center!important;margin:5px auto!important;background:radial-gradient(circle,#102b42 57%,transparent 59%)!important;border:7px solid rgba(255,212,71,.25)!important;box-shadow:0 0 0 5px rgba(255,255,255,.07),0 0 32px rgba(255,212,71,.22)!important}
+#game.active:not(.playing-mode) #reservationPanel .countdown-ring strong{font-size:clamp(48px,14vw,68px)!important;line-height:1!important;color:#ffd447!important;font-weight:1000!important}
+#game.active:not(.playing-mode) #reservationPanel .countdown-ring small{font-size:11px!important;letter-spacing:2px!important}
+#game.active:not(.playing-mode) #reservationPanel p{font-size:14px!important;color:#fff!important}
+#game.active:not(.playing-mode) #reservationPanel .reservation-actions{width:min(100%,430px)!important;display:grid!important;grid-template-columns:1fr 1fr!important;gap:9px!important}
+#game.active:not(.playing-mode) #reservationPanel .reservation-actions button{width:100%!important;min-height:46px!important;font-size:clamp(11px,3vw,14px)!important;white-space:normal!important}
+#game.active:not(.playing-mode) #reservationPanel .prize-action{background:#173c30!important;border:1px solid #d5b53b!important;color:#ffe17a!important}
+@media(max-width:420px){
+ #game.active:not(.playing-mode) #selectArea .cardgrid{grid-template-columns:repeat(10,minmax(0,1fr))!important;gap:2px!important}
+ #game.active:not(.playing-mode) #selectArea .pick{min-height:29px!important;font-size:10px!important}
+}
 </style>
