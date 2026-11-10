@@ -336,6 +336,7 @@ async def root():return {"app":"Cartela Bingo","mini_app":"/app","health":"/heal
 async def mini():
  # Serve the current frontend directly and prevent browsers/proxies from reusing an old HTML page.
  # This is a presentation/deployment diagnostic only; payment and wallet routes are unchanged.
+html = (STATIC / "index.html").read_text(encoding="utf-8")
  from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
