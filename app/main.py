@@ -337,7 +337,6 @@ async def mini():
  # Serve the current frontend directly and prevent browsers/proxies from reusing an old HTML page.
  # This is a presentation/deployment diagnostic only; payment and wallet routes are unchanged.
 html = (STATIC / "index.html").read_text(encoding="utf-8")
- 
 @app.get("/health")
 async def health():return {"status":"ok"}
 @app.get("/health/database")
