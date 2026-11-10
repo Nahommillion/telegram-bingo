@@ -19,7 +19,7 @@ BOT=os.getenv("TELEGRAM_BOT_TOKEN","").strip(); DB=os.getenv("DATABASE_URL","").
 WEB=os.getenv("WEB_APP_URL","https://telegram-bingo-zq2q.onrender.com/app").strip()
 SUPPORT=os.getenv("SUPPORT_URL","").strip(); PAYKEY=os.getenv("PAYMENT_INGEST_API_KEY","").strip(); OWNER_ID=os.getenv("PLATFORM_OWNER_TELEGRAM_ID","").strip()
 CHECK_ET_API_KEY=os.getenv("CHECK_ET_API_KEY","").strip()
-STATIC=Path(__file__).parent/"static"; STATIC.mkdir(exist_ok=True)
+STATIC = Path(__file__).resolve().parent / "app" / "static"
 engine=bot=None; ticker=None; lock=asyncio.Lock()
 _games_by_stake={}
 _current_stake=ContextVar("bingo_current_stake",default="2.00")
