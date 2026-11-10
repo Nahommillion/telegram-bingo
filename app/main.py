@@ -337,23 +337,7 @@ async def mini():
  # Serve the current frontend directly and prevent browsers/proxies from reusing an old HTML page.
  # This is a presentation/deployment diagnostic only; payment and wallet routes are unchanged.
 html = (STATIC / "index.html").read_text(encoding="utf-8")
- from pathlib import Path
-
-BASE_DIR = Path(__file__).resolve().parent
-
-if (BASE_DIR / "app" / "static" / "index.html").exists():
-    STATIC = BASE_DIR / "app" / "static"
-elif (BASE_DIR / "static" / "index.html").exists():
-    STATIC = BASE_DIR / "static"
-else:
-    STATIC = BASE_DIR / "app" / "static"
- return HTMLResponse(html,headers={
-  "Cache-Control":"no-store, no-cache, must-revalidate, max-age=0",
-  "Pragma":"no-cache",
-  "Expires":"0",
-  "X-Frontend-Source":"app/static/index.html",
-  "X-Frontend-Build":"graphics-addition-20261014",
- })
+ 
 @app.get("/health")
 async def health():return {"status":"ok"}
 @app.get("/health/database")
