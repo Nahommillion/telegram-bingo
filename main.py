@@ -19,7 +19,7 @@ BOT=os.getenv("TELEGRAM_BOT_TOKEN","").strip(); DB=os.getenv("DATABASE_URL","").
 WEB=os.getenv("WEB_APP_URL","https://telegram-bingo-zq2q.onrender.com/app").strip()
 SUPPORT=os.getenv("SUPPORT_URL","").strip(); PAYKEY=os.getenv("PAYMENT_INGEST_API_KEY","").strip(); OWNER_ID=os.getenv("PLATFORM_OWNER_TELEGRAM_ID","").strip()
 CHECK_ET_API_KEY=os.getenv("CHECK_ET_API_KEY","").strip()
-STATIC = Path(__file__).resolve().parent / "app" / "static"
+STATIC=Path(__file__).parent/"static"; STATIC.mkdir(exist_ok=True)
 engine=bot=None; ticker=None; lock=asyncio.Lock()
 _games_by_stake={}
 _current_stake=ContextVar("bingo_current_stake",default="2.00")
@@ -204,7 +204,9 @@ async def bottext(up,ctx):
   async with engine.connect() as c:b=(await c.execute(text("SELECT balance FROM bingo_wallets WHERE telegram_id=:i"),{"i":u.id})).scalar_one_or_none() or 0
   await m.reply_text(f"💰 {b} Birr",reply_markup=kb(l))
  elif a=="deposit":await m.reply_text("Create a request in Wallet. Balance is credited only after a trusted payment record matches.",reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💳 Open Wallet",web_app=WebAppInfo(url=WEB+"?tab=wallet"))]]))
- elif a=="support":await m.reply_text(SUPPORT or "Support contact not configured.",reply_markup=kb(l))
+ elif a=="support":
+  support_text=SUPPORT or ("📞 GOFEREHABESHA BINGO SUPPORT\n\n📱 Telebirr receiving/support accounts:\n• Nahom Million — 0943912235\n• Tewdros Getu — 0937189718\n• Tinsae Merga — 0934417096\n\n📢 Telegram Channel: https://t.me/Gofere_Habesha_Bingo\n👥 Telegram Group: https://t.me/Goferehabeshabingo\n\nPlease verify the recipient name before sending money.")
+  await m.reply_text(support_text,reply_markup=kb(l),disable_web_page_preview=True)
  elif a=="help":
   help_en=("🎱 GOFEREHABESHA BINGO — HOW TO PLAY\n\nWELCOME! Follow these steps to play:\n\n1️⃣ Register: send your own phone number using the 📱 Share my phone number button.\n2️⃣ Deposit: open Wallet → Deposit in the Mini App, choose an available payment method, and wait until your payment is verified and your wallet is credited.\n3️⃣ Join a game: tap 🎮 Play Now, choose your bet (minimum 2 Birr per cartela), select available cartelas (1–200), and confirm your selection. Green cartelas are available; black cartelas are taken.\n4️⃣ Wait for the 30-second countdown. A round starts only if at least 2 different players have joined. If fewer than 2 players have joined when the countdown ends, the round does not start and the countdown restarts.\n5️⃣ When the game starts, cartela selection closes and numbers are called from 1 to 75. Watch your cartela and mark the numbers that are called.\n6️⃣ Winning patterns: complete one full horizontal row, one full vertical column, either diagonal, or all four corners. The center square is free. When your cartela completes a pattern, press its 🏆 BINGO button. The server checks the called numbers and your marks. A false claim suspends you from claiming for the rest of that round.\n7️⃣ The winner receives 80% of the total bets. If another player wins first, the round ends and other players cannot claim that round.\n\n⚠️ Keep the Mini App open during the game. If number audio is muted, tap Enable called-number sound. Play fairly and good luck!")
   help_am=("🎱 GOFEREHABESHA BINGO — የጨዋታ መመሪያ\n\nእንኳን ወደ ጨዋታው በደህና መጡ! ለመጫወት እነዚህን ደረጃዎች ይከተሉ፦\n\n1️⃣ ምዝገባ፦ 📱 ስልክ ቁጥር አጋራ የሚለውን ቁልፍ በመጠቀም የራስዎን ስልክ ቁጥር ያጋሩ።\n2️⃣ ገንዘብ ማስገባት፦ በMini App ውስጥ Wallet → Deposit ይክፈቱ፣ ከሚገኙት የክፍያ ዘዴዎች አንዱን ይምረጡ። ክፍያው እስኪረጋገጥና ገንዘቡ ወደ ዋሌትዎ እስኪገባ ይጠብቁ።\n3️⃣ ጨዋታ መቀላቀል፦ 🎮 አሁን ይጫወቱ ይጫኑ፣ የውርርድ መጠንዎን (በእያንዳንዱ ካርቴላ ቢያንስ 2 ብር) ይምረጡ፣ ከ1–200 ያሉ ክፍት ካርቴላዎችን መርጠው ያረጋግጡ። አረንጓዴ ካርቴላ ክፍት ነው፤ ጥቁር ካርቴላ ተይዟል።\n4️⃣ የ30 ሰከንድ ቆጠራውን ይጠብቁ። ጨዋታው የሚጀምረው ቢያንስ 2 የተለያዩ ተጫዋቾች ሲቀላቀሉ ብቻ ነው። ቆጠራው ሲያበቃ ከ2 በታች ተጫዋቾች ካሉ ጨዋታው አይጀምርም፤ ቆጠራው እንደገና ይጀምራል።\n5️⃣ ጨዋታው ሲጀምር ካርቴላ መምረጥ ይዘጋል። ከ1 እስከ 75 ያሉ ቁጥሮች ይጠራሉ። በካርቴላዎ ላይ የወጡትን ቁጥሮች እየተከታተሉ ምልክት ያድርጉ።\n6️⃣ ማሸነፊያ ቅጦች፦ አንድ ሙሉ አግድም መስመር፣ አንድ ሙሉ ቁልቁል መስመር፣ ከሁለቱ ዲያጎናሎች አንዱ ወይም አራቱም ጠርዞች ሲሟሉ ያሸንፋሉ። መካከለኛው ሳጥን ነፃ ነው። ቅጹ ሲሟላ በካርቴላዎ ላይ 🏆 BINGO የሚለውን ቁልፍ ይጫኑ። ሰርቨሩ ቁጥሮቹንና ምልክቶችዎን ያረጋግጣል። ሐሰተኛ ጥያቄ ካቀረቡ በዚያ ዙር ተጨማሪ ቢንጎ እንዳይጠይቁ ይታገዳሉ።\n7️⃣ አሸናፊው ከጠቅላላ ውርርድ 80% ያገኛል። ሌላ ተጫዋች ቀድሞ ካሸነፈ ያ ዙር ይጠናቀቃል።\n\n⚠️ በጨዋታው ጊዜ Mini App ክፍት ያድርጉ። የቁጥር ድምፅ ከጠፋ Enable called-number sound የሚለውን ይጫኑ። መልካም ዕድል!")
@@ -334,14 +336,8 @@ async def root():return {"app":"Cartela Bingo","mini_app":"/app","health":"/heal
 async def mini():
  # Serve the current frontend directly and prevent browsers/proxies from reusing an old HTML page.
  # This is a presentation/deployment diagnostic only; payment and wallet routes are unchanged.
- html=(STATIC/"index.html").read_text(encoding="utf-8")
- return HTMLResponse(html,headers={
-  "Cache-Control":"no-store, no-cache, must-revalidate, max-age=0",
-  "Pragma":"no-cache",
-  "Expires":"0",
-  "X-Frontend-Source":"app/static/index.html",
-  "X-Frontend-Build":"graphics-addition-20261014",
- })
+html = (STATIC / "index.html").read_text(encoding="utf-8")
+ 
 @app.get("/health")
 async def health():return {"status":"ok"}
 @app.get("/health/database")
