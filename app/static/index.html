@@ -945,6 +945,7 @@ async function refreshGame(){
     showReservationPanel();
     updateReservationCountdown();
   }else if(mine.length){
+    reservationPending=false;
     document.getElementById('reservationPanel')?.classList.add('hidden');
     document.getElementById('selectArea').classList.add('hidden');
     document.getElementById('playing').classList.remove('hidden');
@@ -1052,14 +1053,16 @@ async function cancelCartelaSelection(){
  selectedCartelas.clear();pendingCartelas.clear();choicesRenderKey='';updateSelectionSummary();await refreshGame().catch(()=>{});go('game');msg(L==='am'?'ካርቴላ ተሰርዟል። ሌላ ካርቴላ ይምረጡ።':'Cartela cancelled. Choose another cartela.');
 }
 async function startSelectedGame(){
- const stake=Number(document.getElementById('stake').value||0);
+ const stake=Number(document.getElementById('stake')?.value||0);
  if(!selectedCartelas.size){msg(t('selectAtLeastOne'),true);return;}
  if(!Number.isFinite(stake)||stake<2||stake>1000){msg(t('minimumBetError'),true);return;}
  const picked=[...selectedCartelas].sort((a,b)=>a-b);
- if(!window.confirm((L==='am'?'እርግጠኛ ነዎት? ካርቴላ: ':'Are you sure you want to play with cartela(s): ')+picked.map(n=>'#'+n).join(', ')+'?'))return;
+ // Replace the old native Android OK/Cancel dialog with the custom
+ // reservation countdown overlay. Keep the existing join API unchanged.
  reservationPending=true;
  await joinGame(picked,stake);
  if((G?.my_cartelas||[]).length)go('game');
+ else reservationPending=false;
 }
 function showReservationPanel(){
  const panel=document.getElementById('reservationPanel');const area=document.getElementById('selectArea');const mine=G?.my_cartelas||[];
@@ -1202,7 +1205,7 @@ async function deposit(){
   let result=null;
   const maxChecks=20; // Recheck transient bank outages for up to about four minutes.
   for(let attempt=0;attempt<maxChecks;attempt++){
-   button.textContent=attempt===0?'Checking receipt with Check.et…':`Waiting for payment verification (${attempt+1}/${maxChecks})…`;
+   button.textContent=attempt===0?'Verifying…':`Verifying… (${attempt+1}/${maxChecks})`;
    result=await api('/api/deposits',{method:'POST',body:JSON.stringify(payload)});
    if(result.status==='verified'){
     msg(result.message||'Payment verified and wallet credited automatically.');
@@ -1212,10 +1215,11 @@ async function deposit(){
     return;
    }
    await refreshWallet();
-   depositStatus((result.message||'Payment is not verified yet. No wallet credit has been made.')+' Checking again automatically; keep this screen open.');
+   const playerStatus=(result.message||'Payment is not verified yet. No wallet credit has been made.').replace(/Check\.et/gi,'payment service');
+   depositStatus(playerStatus+' Verifying again automatically; keep this screen open.');
    await new Promise(resolve=>setTimeout(resolve,12000));
   }
-  depositStatus('The payment verification service or bank is still unavailable. Your deposit remains pending and has not been credited. Keep this screen open and press Verify receipt & submit deposit to retry.',true);
+  depositStatus('Your payment is still being verified. Your deposit remains pending and has not been credited yet. Keep this screen open or try again shortly.',true);
  }catch(e){msg(e.message,true);}
  finally{depositBusy=false;button.disabled=false;button.textContent=originalLabel;}
 }
@@ -1401,6 +1405,32 @@ body > #winnerCartela.winner-overlay .winner-card{max-width:100%!important;margi
 #game.active.playing-mode #playing .my-card-item .danger{display:none!important}
 #game.active.playing-mode #playing .my-card-item .cell{aspect-ratio:1!important}
 @media(max-width:360px){#game.active:not(.playing-mode) .game-workspace{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;gap:3px!important;padding:3px!important}#game.active:not(.playing-mode) .game-workspace .cardgrid{grid-template-columns:repeat(3,minmax(0,1fr))!important}}
+</style>
+
+
+<style id="final-cartela-and-countdown-control-fix">
+/* Selection: exactly Leave, Refresh, Start. */
+body:has(#game.active:not(.playing-mode)) #activeGameControls .selection-only-control{display:flex!important}
+body:has(#game.active:not(.playing-mode)) #activeGameControls .playing-only-control{display:none!important}
+
+/* Live game: exactly Leave, Refresh, Sound, BINGO. Never show Start. */
+body:has(#game.active.playing-mode) #activeGameControls{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 42px minmax(0,1.35fr)!important;gap:6px!important}
+body:has(#game.active.playing-mode) #activeGameControls .selection-only-control{display:none!important}
+body:has(#game.active.playing-mode) #activeGameControls .playing-only-control{display:flex!important;align-items:center;justify-content:center}
+
+/* While the custom reservation/countdown screen is visible, remove every
+   footer/control/navigation button. The overlay itself owns the actions. */
+body:has(#game.active #reservationPanel:not(.hidden)) .active-game-controls,
+body:has(#game.active #reservationPanel:not(.hidden)) .bottom{display:none!important}
+body:has(#game.active #reservationPanel:not(.hidden)) #game{padding-bottom:0!important}
+body:has(#game.active #reservationPanel:not(.hidden)) #reservationPanel:not(.hidden){
+  padding:18px 18px calc(18px + env(safe-area-inset-bottom))!important;
+}
+
+/* Wallet and leaderboard headings sit at the top without the unused brand-header gap. */
+body:has(#wallet.active)>.wrap>.top,
+body:has(#leaderboard.active)>.wrap>.top{display:none!important}
+#wallet.active>.title,#leaderboard.active>.title{margin-top:0!important;padding-top:0!important}
 </style>
 
 </body>
